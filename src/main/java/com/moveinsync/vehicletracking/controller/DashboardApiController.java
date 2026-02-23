@@ -3,6 +3,7 @@ package com.moveinsync.vehicletracking.controller;
 import com.moveinsync.vehicletracking.dto.ApiResponse;
 import com.moveinsync.vehicletracking.entity.*;
 import com.moveinsync.vehicletracking.repository.*;
+import com.moveinsync.vehicletracking.util.GeofenceUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -27,6 +28,7 @@ public class DashboardApiController {
     private final OfficeGeofenceRepository officeGeofenceRepository;
     private final LocationLogRepository locationLogRepository;
     private final EventLogRepository eventLogRepository;
+    private final DriverRepository driverRepository;
 
     /**
      * Returns all data needed by the dashboard in a single call
@@ -48,6 +50,11 @@ public class DashboardApiController {
         data.put("vehicles", vehicles);
 
         // Trips (resolve lazy vehicle reference manually)
+        // Get latest location log for ETA calculation
+        List<LocationLog> allLogs = locationLogRepository.findAll();
+        List<OfficeGeofence> offices = officeGeofenceRepository.findAll();
+        List<PickupPoint> allPickups = pickupPointRepository.findAll();
+
         List<Map<String, Object>> trips = tripRepository.findAll().stream()
                 .map(t -> {
                     Map<String, Object> m = new LinkedHashMap<>();
@@ -57,6 +64,53 @@ public class DashboardApiController {
                     m.put("status", t.getStatus());
                     m.put("startTime", t.getStartTime() != null ? t.getStartTime().toString() : null);
                     m.put("endTime", t.getEndTime() != null ? t.getEndTime().toString() : null);
+                    m.put("totalDistanceKm", t.getTotalDistanceKm() != null
+                            ? Math.round(t.getTotalDistanceKm() * 100.0) / 100.0 : 0.0);
+                    m.put("durationMinutes", t.getDurationMinutes() != null ? t.getDurationMinutes() : 0);
+
+                    // Driver info (Functionality #6)
+                    driverRepository.findByVehicleId(t.getVehicle().getId()).ifPresent(d -> {
+                        m.put("driverName", d.getName());
+                        m.put("driverPhone", d.getPhoneNumber());
+                        m.put("driverLicense", d.getLicenseNumber());
+                    });
+
+                    // ETA to next stop (Functionality #6)
+                    Optional<LocationLog> latestLog = allLogs.stream()
+                            .filter(l -> t.getId().equals(l.getTripId()))
+                            .max(Comparator.comparing(LocationLog::getTimestamp));
+
+                    if (latestLog.isPresent() && "IN_PROGRESS".equals(t.getStatus())) {
+                        LocationLog ll = latestLog.get();
+                        double speed = ll.getSpeed() > 2.0 ? ll.getSpeed() : 30.0;
+
+                        // ETA to pickup if still PENDING, else ETA to office
+                        Optional<PickupPoint> tripPickup = allPickups.stream()
+                                .filter(pp -> t.getId().equals(pp.getTrip().getId()))
+                                .findFirst();
+
+                        if (tripPickup.isPresent() && "PENDING".equals(tripPickup.get().getStatus())) {
+                            PickupPoint pp = tripPickup.get();
+                            double distKm = GeofenceUtil.calculateDistance(
+                                    ll.getLatitude(), ll.getLongitude(),
+                                    pp.getLatitude(), pp.getLongitude()) / 1000.0;
+                            long etaMin = Math.round((distKm / speed) * 60);
+                            m.put("etaMinutes", etaMin);
+                            m.put("etaDestination", "Pickup");
+                        } else if (!offices.isEmpty()) {
+                            OfficeGeofence of = offices.get(0);
+                            double distKm = GeofenceUtil.calculateDistance(
+                                    ll.getLatitude(), ll.getLongitude(),
+                                    of.getLatitude(), of.getLongitude()) / 1000.0;
+                            long etaMin = Math.round((distKm / speed) * 60);
+                            m.put("etaMinutes", etaMin);
+                            m.put("etaDestination", "Office");
+                        }
+                    } else {
+                        m.put("etaMinutes", null);
+                        m.put("etaDestination", null);
+                    }
+
                     return m;
                 }).toList();
         data.put("trips", trips);
@@ -75,8 +129,8 @@ public class DashboardApiController {
                 }).toList();
         data.put("pickupPoints", pickups);
 
-        // Office Geofences
-        List<Map<String, Object>> offices = officeGeofenceRepository.findAll().stream()
+        // Office Geofences (reuse already-loaded offices list)
+        List<Map<String, Object>> officesList = offices.stream()
                 .map(o -> {
                     Map<String, Object> m = new LinkedHashMap<>();
                     m.put("id", o.getId());
@@ -85,7 +139,7 @@ public class DashboardApiController {
                     m.put("radiusMeters", o.getRadiusMeters());
                     return m;
                 }).toList();
-        data.put("officeGeofences", offices);
+        data.put("officeGeofences", officesList);
 
         // Location logs for first trip (route trail)
         Long tripId = trips.isEmpty() ? null : (Long) trips.get(0).get("id");
@@ -154,6 +208,8 @@ public class DashboardApiController {
         trip.setStatus("IN_PROGRESS");
         trip.setEndTime(null);
         trip.setStartTime(LocalDateTime.now());
+        trip.setTotalDistanceKm(null);
+        trip.setDurationMinutes(null);
         tripRepository.save(trip);
 
         // Reset pickup point

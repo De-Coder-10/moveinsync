@@ -33,4 +33,10 @@ public class Trip {
 
     private LocalDateTime endTime;
 
+    // Total distance driven in km (incremented on every GPS ping)
+    private Double totalDistanceKm;
+
+    // Duration of trip in minutes (set on trip completion)
+    private Integer durationMinutes;
+
 }

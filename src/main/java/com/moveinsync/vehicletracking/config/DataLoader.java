@@ -22,6 +22,7 @@ public class DataLoader implements CommandLineRunner {
     private final TripRepository tripRepository;
     private final PickupPointRepository pickupPointRepository;
     private final OfficeGeofenceRepository officeGeofenceRepository;
+    private final DriverRepository driverRepository;
 
     @Override
     public void run(String... args) throws Exception {
@@ -51,6 +52,16 @@ public class DataLoader implements CommandLineRunner {
                 .build();
         vehicleRepository.save(vehicle);
         log.info("Vehicle created: {}", vehicle.getRegistrationNumber());
+
+        // Create Driver assigned to this vehicle
+        Driver driver = Driver.builder()
+                .name("Ravi Kumar")
+                .phoneNumber("+91-9876543210")
+                .licenseNumber("KA0120210012345")
+                .vehicle(vehicle)
+                .build();
+        driverRepository.save(driver);
+        log.info("Driver created: {}, Phone: {}", driver.getName(), driver.getPhoneNumber());
 
         // Create Trip with status IN_PROGRESS
         Trip trip = Trip.builder()
