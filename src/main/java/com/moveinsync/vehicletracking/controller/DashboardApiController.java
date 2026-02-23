@@ -4,6 +4,7 @@ import com.moveinsync.vehicletracking.dto.ApiResponse;
 import com.moveinsync.vehicletracking.entity.*;
 import com.moveinsync.vehicletracking.repository.*;
 import com.moveinsync.vehicletracking.service.AutoSimulationService;
+import com.moveinsync.vehicletracking.service.CacheableDataService;
 import com.moveinsync.vehicletracking.util.GeofenceUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,6 +32,7 @@ public class DashboardApiController {
     private final EventLogRepository eventLogRepository;
     private final DriverRepository driverRepository;
     private final AutoSimulationService autoSimulationService;
+    private final CacheableDataService cacheableDataService;
 
     /**
      * Returns all data needed by the dashboard in a single call
@@ -40,8 +42,8 @@ public class DashboardApiController {
     public Map<String, Object> getDashboardData() {
         Map<String, Object> data = new LinkedHashMap<>();
 
-        // Vehicles
-        List<Map<String, Object>> vehicles = vehicleRepository.findAll().stream()
+        // Vehicles — served from Caffeine cache (vehicleDriverData) after first load
+        List<Map<String, Object>> vehicles = cacheableDataService.getVehicles().stream()
                 .map(v -> {
                     Map<String, Object> m = new LinkedHashMap<>();
                     m.put("id", v.getId());
@@ -54,7 +56,8 @@ public class DashboardApiController {
         // Trips (resolve lazy vehicle reference manually)
         // Get latest location log for ETA calculation
         List<LocationLog> allLogs = locationLogRepository.findAll();
-        List<OfficeGeofence> offices = officeGeofenceRepository.findAll();
+        // Office geofences — served from Caffeine cache (officeGeofences) after first load
+        List<OfficeGeofence> offices = cacheableDataService.getOfficeGeofences();
         List<PickupPoint> allPickups = pickupPointRepository.findAll();
 
         List<Map<String, Object>> trips = tripRepository.findAll().stream()
@@ -70,8 +73,8 @@ public class DashboardApiController {
                             ? Math.round(t.getTotalDistanceKm() * 100.0) / 100.0 : 0.0);
                     m.put("durationMinutes", t.getDurationMinutes() != null ? t.getDurationMinutes() : 0);
 
-                    // Driver info (Functionality #6)
-                    driverRepository.findByVehicleId(t.getVehicle().getId()).ifPresent(d -> {
+                    // Driver info — served from Caffeine cache (vehicleDriverData) keyed by vehicleId
+                    cacheableDataService.getDriverByVehicleId(t.getVehicle().getId()).ifPresent(d -> {
                         m.put("driverName", d.getName());
                         m.put("driverPhone", d.getPhoneNumber());
                         m.put("driverLicense", d.getLicenseNumber());
@@ -221,6 +224,8 @@ public class DashboardApiController {
 
         // Clear in-memory simulation state (waypoint indices, reset timers)
         autoSimulationService.resetAll();
+        // Evict static caches so next dashboard poll reloads fresh data from DB
+        cacheableDataService.evictStaticCaches();
 
         for (Trip trip : trips) {
             Long tripId = trip.getId();
