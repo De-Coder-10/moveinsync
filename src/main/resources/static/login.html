@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MoveInSync — Login</title>
+    <style>
+        /* ── Reset & Base ─────────────────────────────────────────────── */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --green-dark  : #166534;
+            --green-mid   : #16a34a;
+            --green-light : #dcfce7;
+            --green-accent: #22c55e;
+            --white       : #ffffff;
+            --grey-50     : #f9fafb;
+            --grey-100    : #f3f4f6;
+            --grey-200    : #e5e7eb;
+            --grey-400    : #9ca3af;
+            --grey-600    : #4b5563;
+            --grey-800    : #1f2937;
+            --red-soft    : #fef2f2;
+            --red-mid     : #ef4444;
+            --shadow      : 0 4px 24px rgba(0,0,0,0.10);
+            --shadow-lg   : 0 8px 40px rgba(0,0,0,0.15);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--grey-50);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-image:
+                radial-gradient(circle at 20% 20%, rgba(34,197,94,0.08) 0%, transparent 50%),
+                radial-gradient(circle at 80% 80%, rgba(22,163,74,0.06) 0%, transparent 50%);
+        }
+
+        /* ── Card ─────────────────────────────────────────────────────── */
+        .card {
+            background: var(--white);
+            border-radius: 16px;
+            box-shadow: var(--shadow-lg);
+            width: 100%;
+            max-width: 420px;
+            padding: 48px 40px 40px;
+            border: 1px solid var(--grey-200);
+        }
+
+        /* ── Logo / Header ────────────────────────────────────────────── */
+        .logo-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+        .logo-icon {
+            width: 44px; height: 44px;
+            background: var(--green-dark);
+            border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 22px;
+            flex-shrink: 0;
+        }
+        .logo-text { font-size: 20px; font-weight: 700; color: var(--green-dark); letter-spacing: -0.3px; }
+        .logo-sub  { font-size: 11px; color: var(--grey-400); text-transform: uppercase; letter-spacing: 0.8px; }
+
+        .divider {
+            height: 1px;
+            background: var(--grey-200);
+            margin: 24px 0;
+        }
+
+        .page-title   { font-size: 22px; font-weight: 700; color: var(--grey-800); margin-bottom: 4px; }
+        .page-subtitle{ font-size: 13px; color: var(--grey-400); margin-bottom: 28px; }
+
+        /* ── Demo banner ──────────────────────────────────────────────── */
+        .demo-banner {
+            background: var(--green-light);
+            border: 1px solid #bbf7d0;
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 12px;
+            color: var(--green-dark);
+            margin-bottom: 24px;
+            line-height: 1.6;
+        }
+        .demo-banner strong { font-weight: 600; }
+        .demo-banner code {
+            background: rgba(22,101,52,0.10);
+            border-radius: 4px;
+            padding: 1px 5px;
+            font-family: monospace;
+            font-size: 11.5px;
+        }
+
+        /* ── Form ─────────────────────────────────────────────────────── */
+        .form-group  { margin-bottom: 18px; }
+        label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--grey-800);
+            margin-bottom: 6px;
+        }
+        .input-wrap  { position: relative; }
+        .input-icon  {
+            position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+            font-size: 16px; pointer-events: none;
+        }
+        input[type="email"], input[type="password"] {
+            width: 100%;
+            padding: 11px 12px 11px 38px;
+            border: 1.5px solid var(--grey-200);
+            border-radius: 8px;
+            font-size: 14px;
+            color: var(--grey-800);
+            background: var(--grey-50);
+            outline: none;
+            transition: border-color .2s, box-shadow .2s, background .2s;
+        }
+        input:focus {
+            border-color: var(--green-mid);
+            background: var(--white);
+            box-shadow: 0 0 0 3px rgba(34,197,94,0.12);
+        }
+
+        /* ── Error message ────────────────────────────────────────────── */
+        .error-msg {
+            display: none;
+            background: var(--red-soft);
+            border: 1px solid #fecaca;
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 13px;
+            color: var(--red-mid);
+            margin-bottom: 16px;
+            font-weight: 500;
+        }
+        .error-msg.show { display: flex; align-items: center; gap: 8px; }
+
+        /* ── Submit button ────────────────────────────────────────────── */
+        .btn-login {
+            width: 100%;
+            padding: 13px;
+            background: var(--green-dark);
+            color: var(--white);
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background .2s, transform .1s, box-shadow .2s;
+            margin-top: 4px;
+        }
+        .btn-login:hover:not(:disabled) {
+            background: var(--green-mid);
+            box-shadow: 0 4px 12px rgba(22,163,74,0.30);
+        }
+        .btn-login:active:not(:disabled) { transform: translateY(1px); }
+        .btn-login:disabled {
+            background: var(--grey-400);
+            cursor: not-allowed;
+        }
+
+        /* ── Spinner ──────────────────────────────────────────────────── */
+        .spinner {
+            display: none;
+            width: 18px; height: 18px;
+            border: 2px solid rgba(255,255,255,0.4);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin .6s linear infinite;
+            margin: 0 auto;
+        }
+        .btn-login.loading .btn-text { display: none; }
+        .btn-login.loading .spinner  { display: inline-block; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── Footer note ──────────────────────────────────────────────── */
+        .footer-note {
+            text-align: center;
+            font-size: 11px;
+            color: var(--grey-400);
+            margin-top: 28px;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+
+<div class="card">
+
+    <!-- Logo -->
+    <div class="logo-row">
+        <div class="logo-icon">🚌</div>
+        <div>
+            <div class="logo-text">MoveInSync</div>
+            <div class="logo-sub">Vehicle Tracking System</div>
+        </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="page-title">Welcome back</div>
+    <div class="page-subtitle">Sign in to access the operations dashboard</div>
+
+    <!-- Demo credentials hint -->
+    <!--
+        ⚠️ THIS IS A SIMULATED AUTHENTICATION MECHANISM FOR DEMONSTRATION PURPOSES ONLY.
+           Credentials are hardcoded in AuthController.java for academic demo use.
+    -->
+    <div class="demo-banner">
+        🔐 <strong>Demo credentials</strong><br>
+        Email: <code>admin@moveinsync.com</code><br>
+        Password: <code>Move@123</code>
+    </div>
+
+    <!-- Error message -->
+    <div class="error-msg" id="errMsg">
+        <span>⚠️</span>
+        <span id="errText">Invalid credentials</span>
+    </div>
+
+    <!-- Login form -->
+    <form id="loginForm" onsubmit="handleLogin(event)">
+        <div class="form-group">
+            <label for="email">Email address</label>
+            <div class="input-wrap">
+                <span class="input-icon">✉️</span>
+                <input type="email" id="email" name="email"
+                       placeholder="admin@moveinsync.com"
+                       value="admin@moveinsync.com"
+                       autocomplete="email" required>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="password">Password</label>
+            <div class="input-wrap">
+                <span class="input-icon">🔑</span>
+                <input type="password" id="password" name="password"
+                       placeholder="Move@123"
+                       autocomplete="current-password" required>
+            </div>
+        </div>
+
+        <button type="submit" class="btn-login" id="loginBtn">
+            <span class="btn-text">Sign in to Dashboard</span>
+            <span class="spinner"></span>
+        </button>
+    </form>
+
+    <div class="footer-note">
+        ⚠️ Simulated authentication — for academic demonstration only.<br>
+        No real encryption or token validation is used.
+    </div>
+
+</div>
+
+<script>
+    /*
+     * ⚠️ THIS IS A SIMULATED AUTHENTICATION MECHANISM FOR DEMONSTRATION PURPOSES ONLY.
+     *    Posts credentials to AuthController → on success redirects to dashboard.html.
+     */
+    async function handleLogin(e) {
+        e.preventDefault();
+
+        const email    = document.getElementById('email').value.trim();
+        const password = document.getElementById('password').value;
+        const btn      = document.getElementById('loginBtn');
+        const errMsg   = document.getElementById('errMsg');
+        const errText  = document.getElementById('errText');
+
+        // Hide previous error, show loading state
+        errMsg.classList.remove('show');
+        btn.classList.add('loading');
+        btn.disabled = true;
+
+        try {
+            const res = await fetch('/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password })
+            });
+
+            const data = await res.json();
+
+            if (res.ok && data.success) {
+                // ✅ Authenticated — redirect to dashboard
+                btn.style.background = '#16a34a';
+                window.location.href = data.redirect || '/dashboard.html';
+            } else {
+                // ❌ Wrong credentials — show error
+                errText.textContent = data.message || 'Invalid credentials';
+                errMsg.classList.add('show');
+                btn.classList.remove('loading');
+                btn.disabled = false;
+                document.getElementById('password').focus();
+                document.getElementById('password').select();
+            }
+        } catch (err) {
+            errText.textContent = 'Connection error — is the server running?';
+            errMsg.classList.add('show');
+            btn.classList.remove('loading');
+            btn.disabled = false;
+        }
+    }
+
+    // If already authenticated, go straight to dashboard
+    (async () => {
+        try {
+            const r = await fetch('/auth/status');
+            const d = await r.json();
+            if (d.authenticated) window.location.href = '/dashboard.html';
+        } catch (_) {}
+    })();
+</script>
+</body>
+</html>

@@ -396,6 +396,8 @@
     <div class="header-right">
         <span class="live-clock" id="liveClock">--:--:-- IST</span>
         <span id="connBadge" class="conn-badge conn-disc"><span class="pulse"></span> Connecting…</span>
+        <span id="userPill" style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.85);background:rgba(255,255,255,0.12);padding:5px 11px;border-radius:20px;border:1px solid rgba(255,255,255,0.2);display:none">👤 <span id="userEmail"></span></span>
+        <button onclick="doLogout()" style="font-size:11px;font-weight:700;padding:5px 13px;border-radius:20px;border:1px solid rgba(255,255,255,0.3);background:rgba(239,68,68,0.25);color:#FCA5A5;cursor:pointer;transition:background .2s" onmouseover="this.style.background='rgba(239,68,68,0.45)'" onmouseout="this.style.background='rgba(239,68,68,0.25)'">⎋ Logout</button>
     </div>
 </header>
 
@@ -1370,17 +1372,52 @@ async function resetTrip() {
 }
 
 // ═══════════════════════════════════════════════════
+// AUTH GUARD
+// ⚠️ THIS IS A SIMULATED AUTHENTICATION MECHANISM FOR DEMONSTRATION PURPOSES ONLY.
+// Checks the server session before allowing the dashboard to load.
+// ═══════════════════════════════════════════════════
+async function checkAuth() {
+    try {
+        const r = await fetch('/auth/status');
+        const d = await r.json();
+        if (!d.authenticated) {
+            window.location.href = '/login.html';
+            return false;
+        }
+        // Show user pill in header
+        if (d.user) {
+            document.getElementById('userEmail').textContent = d.user;
+            document.getElementById('userPill').style.display = 'inline-flex';
+            document.getElementById('userPill').style.alignItems = 'center';
+        }
+        return true;
+    } catch (e) {
+        // If auth endpoint unreachable, allow access (server might still be starting)
+        return true;
+    }
+}
+
+function doLogout() {
+    // ⚠️ THIS IS A SIMULATED AUTHENTICATION MECHANISM FOR DEMONSTRATION PURPOSES ONLY.
+    window.location.href = '/auth/logout';
+}
+
+// ═══════════════════════════════════════════════════
 // BOOT
 // ═══════════════════════════════════════════════════
-initMap();
-connectWebSocket();
-refreshDashboard();
-// Poll every 2 s for status, events, KPIs, pickup updates
-pollInterval = setInterval(() => { if (!isSimulating) refreshDashboard(); }, 2000);
-// Initial status message
-setTimeout(() => {
-    document.getElementById('simStatus').textContent = '⏸ Ready — click "Start Trip" on any vehicle to begin road simulation';
-}, 1500);
+(async () => {
+    const ok = await checkAuth();
+    if (!ok) return; // redirected to login
+    initMap();
+    connectWebSocket();
+    refreshDashboard();
+    // Poll every 2 s for status, events, KPIs, pickup updates
+    pollInterval = setInterval(() => { if (!isSimulating) refreshDashboard(); }, 2000);
+    // Initial status message
+    setTimeout(() => {
+        document.getElementById('simStatus').textContent = '⏸ Ready — click "Start Trip" on any vehicle to begin road simulation';
+    }, 1500);
+})();
 </script>
 </body>
 </html>

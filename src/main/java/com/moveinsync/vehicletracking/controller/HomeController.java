@@ -1,40 +1,24 @@
 package com.moveinsync.vehicletracking.controller;
 
+import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RestController;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
+import jakarta.servlet.http.HttpSession;
 
 /**
- * Home controller that shows API info at the root URL
+ * HomeController — redirects root URL based on authentication state.
+ *
+ * ⚠️  THIS IS A SIMULATED AUTHENTICATION MECHANISM FOR DEMONSTRATION PURPOSES ONLY.
+ *
+ * GET /  →  authenticated → dashboard.html
+ *        →  not authenticated → login.html
  */
-@RestController
+@Controller
 public class HomeController {
 
     @GetMapping("/")
-    public Map<String, Object> home() {
-        Map<String, Object> info = new LinkedHashMap<>();
-        info.put("application", "Vehicle Tracking & Geofence System");
-        info.put("status", "Running");
-        info.put("endpoints", Map.of(
-                "POST /api/location/update", "Send vehicle GPS location update",
-                "GET /", "This page",
-                "GET /dashboard.html", "Real-Time Tracking Dashboard",
-                "GET /h2-console", "H2 Database Console"
-        ));
-        info.put("sampleRequest", Map.of(
-                "url", "POST /api/location/update",
-                "body", Map.of(
-                        "vehicleId", 1,
-                        "tripId", 1,
-                        "latitude", 12.9520,
-                        "longitude", 77.5750,
-                        "speed", 30.0,
-                        "timestamp", "2026-02-23T10:30:00"
-                )
-        ));
-        return info;
+    public String home(HttpSession session) {
+        boolean authenticated = Boolean.TRUE.equals(session.getAttribute("authenticated"));
+        return authenticated ? "redirect:/dashboard.html" : "redirect:/login.html";
     }
-
 }
