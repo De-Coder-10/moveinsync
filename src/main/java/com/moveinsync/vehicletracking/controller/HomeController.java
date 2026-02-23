@@ -20,6 +20,7 @@ public class HomeController {
         info.put("endpoints", Map.of(
                 "POST /api/location/update", "Send vehicle GPS location update",
                 "GET /", "This page",
+                "GET /dashboard.html", "Real-Time Tracking Dashboard",
                 "GET /h2-console", "H2 Database Console"
         ));
         info.put("sampleRequest", Map.of(

@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vehicle Tracking Dashboard</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        /* ===== Reset & Base ===== */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f172a;
+            color: #f1f5f9;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* ===== Layout ===== */
+        .app { display: flex; flex-direction: column; height: 100vh; }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 24px;
+            background: #1e293b;
+            border-bottom: 1px solid #334155;
+            flex-shrink: 0;
+            z-index: 1000;
+        }
+        .header h1 { font-size: 18px; font-weight: 600; }
+        .header h1 span { color: #3b82f6; }
+        .header-controls { display: flex; align-items: center; gap: 16px; font-size: 13px; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+        .status-dot.connected { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
+        .status-dot.disconnected { background: #ef4444; box-shadow: 0 0 6px #ef4444; }
+
+        .toggle-label { display: flex; align-items: center; gap: 8px; cursor: pointer; color: #94a3b8; }
+        .toggle-label input { accent-color: #3b82f6; width: 16px; height: 16px; }
+
+        .main { display: flex; flex: 1; overflow: hidden; }
+
+        /* ===== Sidebar ===== */
+        .sidebar {
+            width: 320px;
+            min-width: 320px;
+            background: #1e293b;
+            border-right: 1px solid #334155;
+            overflow-y: auto;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+        .sidebar::-webkit-scrollbar { width: 6px; }
+        .sidebar::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+
+        /* ===== Cards ===== */
+        .card {
+            background: #334155;
+            border-radius: 10px;
+            padding: 16px;
+            border: 1px solid #475569;
+        }
+        .card-title {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            color: #94a3b8;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .card-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 0;
+            font-size: 13px;
+        }
+        .card-row .label { color: #94a3b8; }
+        .card-row .value { font-weight: 600; color: #f1f5f9; }
+
+        /* ===== Status Badges ===== */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .badge-progress { background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245,158,11,0.3); }
+        .badge-completed { background: rgba(34, 197, 94, 0.15); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
+        .badge-pending { background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245,158,11,0.3); }
+        .badge-arrived { background: rgba(59, 130, 246, 0.15); color: #3b82f6; border: 1px solid rgba(59,130,246,0.3); }
+
+        /* ===== Simulation Buttons ===== */
+        .sim-buttons { display: flex; flex-direction: column; gap: 8px; }
+        .sim-btn {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px;
+            border: 1px solid #475569;
+            border-radius: 8px;
+            background: #1e293b;
+            color: #f1f5f9;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .sim-btn:hover:not(:disabled) { background: #475569; border-color: #64748b; transform: translateY(-1px); }
+        .sim-btn:active:not(:disabled) { transform: translateY(0); }
+        .sim-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .sim-btn .icon { font-size: 18px; }
+        .sim-btn.btn-pickup { border-left: 3px solid #3b82f6; }
+        .sim-btn.btn-drive { border-left: 3px solid #f59e0b; }
+        .sim-btn.btn-office { border-left: 3px solid #22c55e; }
+        .sim-btn.btn-reset { border-left: 3px solid #ef4444; }
+
+        .sim-status {
+            text-align: center;
+            padding: 8px;
+            font-size: 12px;
+            color: #94a3b8;
+            min-height: 32px;
+        }
+        .sim-status.active { color: #f59e0b; }
+
+        /* ===== Event Log ===== */
+        .event-list { list-style: none; display: flex; flex-direction: column; gap: 8px; max-height: 200px; overflow-y: auto; }
+        .event-list::-webkit-scrollbar { width: 4px; }
+        .event-list::-webkit-scrollbar-thumb { background: #475569; border-radius: 2px; }
+
+        .event-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 8px 10px;
+            background: #1e293b;
+            border-radius: 8px;
+            font-size: 12px;
+            border-left: 3px solid #475569;
+            animation: slideIn 0.3s ease;
+        }
+        .event-item.pickup { border-left-color: #3b82f6; }
+        .event-item.completed { border-left-color: #22c55e; }
+        .event-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+        .event-details { flex: 1; }
+        .event-type { font-weight: 700; color: #f1f5f9; }
+        .event-time { color: #64748b; font-size: 11px; margin-top: 2px; }
+        .event-empty { text-align: center; color: #64748b; font-size: 13px; padding: 20px 0; }
+
+        @keyframes slideIn { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: translateX(0); } }
+
+        /* ===== Map ===== */
+        .map-container { flex: 1; position: relative; }
+        #map { width: 100%; height: 100%; }
+
+        /* ===== Map Legend ===== */
+        .map-legend {
+            position: absolute;
+            bottom: 30px;
+            right: 10px;
+            background: rgba(30, 41, 59, 0.92);
+            backdrop-filter: blur(8px);
+            border: 1px solid #475569;
+            border-radius: 10px;
+            padding: 12px 16px;
+            z-index: 999;
+            font-size: 12px;
+        }
+        .map-legend h4 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #94a3b8; margin-bottom: 8px; }
+        .legend-item { display: flex; align-items: center; gap: 8px; padding: 3px 0; color: #cbd5e1; }
+        .legend-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+        .legend-line { width: 18px; height: 3px; border-radius: 2px; flex-shrink: 0; }
+
+        /* ===== Toast Notifications ===== */
+        .toast-container { position: fixed; top: 70px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; }
+        .toast {
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            color: white;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+            animation: toastIn 0.3s ease, toastOut 0.3s ease 3.7s forwards;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .toast-success { background: #16a34a; }
+        .toast-info { background: #2563eb; }
+        .toast-warning { background: #d97706; }
+        .toast-error { background: #dc2626; }
+        @keyframes toastIn { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: translateX(0); } }
+        @keyframes toastOut { from { opacity: 1; } to { opacity: 0; transform: translateY(-10px); } }
+
+        /* ===== Custom Leaflet Markers ===== */
+        .vehicle-icon { background: none !important; border: none !important; }
+        .vehicle-marker {
+            font-size: 28px;
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
+            transition: all 0.4s ease;
+        }
+        .emoji-marker { background: none !important; border: none !important; font-size: 22px; }
+        .leaflet-popup-content-wrapper { background: #1e293b; color: #f1f5f9; border: 1px solid #475569; border-radius: 8px; }
+        .leaflet-popup-tip { background: #1e293b; }
+        .leaflet-popup-content { font-size: 13px; }
+
+        /* ===== Stats Grid ===== */
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .stat-box {
+            background: #1e293b;
+            border-radius: 8px;
+            padding: 10px;
+            text-align: center;
+        }
+        .stat-value { font-size: 20px; font-weight: 700; color: #f1f5f9; }
+        .stat-label { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <h1>🚐 <span>Vehicle Tracking</span> Dashboard</h1>
+            <div class="header-controls">
+                <span id="connectionStatus">
+                    <span class="status-dot connected" id="statusDot"></span>
+                    <span id="statusText">Connected</span>
+                </span>
+                <label class="toggle-label">
+                    <input type="checkbox" id="autoRefresh" checked>
+                    Auto-refresh
+                </label>
+            </div>
+        </header>
+
+        <div class="main">
+            <!-- Sidebar -->
+            <aside class="sidebar">
+
+                <!-- Trip Info -->
+                <div class="card">
+                    <div class="card-title">🗺️ Trip Information</div>
+                    <div class="card-row">
+                        <span class="label">Trip ID</span>
+                        <span class="value" id="tripId">—</span>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">Status</span>
+                        <span id="tripStatus"><span class="badge badge-progress">Loading</span></span>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">Vehicle</span>
+                        <span class="value" id="vehicleReg">—</span>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">Started</span>
+                        <span class="value" id="tripStart">—</span>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">Ended</span>
+                        <span class="value" id="tripEnd">—</span>
+                    </div>
+                </div>
+
+                <!-- Pickup Status -->
+                <div class="card">
+                    <div class="card-title">📍 Pickup Point</div>
+                    <div class="card-row">
+                        <span class="label">Status</span>
+                        <span id="pickupStatus"><span class="badge badge-pending">Pending</span></span>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">Location</span>
+                        <span class="value" id="pickupCoords">—</span>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">Radius</span>
+                        <span class="value" id="pickupRadius">—</span>
+                    </div>
+                </div>
+
+                <!-- Live Stats -->
+                <div class="card">
+                    <div class="card-title">📊 Live Stats</div>
+                    <div class="stats-grid">
+                        <div class="stat-box">
+                            <div class="stat-value" id="statPings">0</div>
+                            <div class="stat-label">GPS Pings</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value" id="statEvents">0</div>
+                            <div class="stat-label">Events</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value" id="statSpeed">—</div>
+                            <div class="stat-label">Last Speed</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value" id="statPosition">—</div>
+                            <div class="stat-label">Last Pos</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Simulation Controls -->
+                <div class="card">
+                    <div class="card-title">🎮 Simulation Controls</div>
+                    <div class="sim-buttons">
+                        <button class="sim-btn btn-pickup" id="btnPickup" onclick="simulatePickup()">
+                            <span class="icon">📍</span> Arrive at Pickup
+                        </button>
+                        <button class="sim-btn btn-drive" id="btnDrive" onclick="simulateDrive()">
+                            <span class="icon">🚗</span> Drive to Office
+                        </button>
+                        <button class="sim-btn btn-office" id="btnOffice" onclick="simulateOffice()">
+                            <span class="icon">🏢</span> Arrive at Office
+                        </button>
+                        <button class="sim-btn btn-reset" id="btnReset" onclick="resetTrip()">
+                            <span class="icon">🔄</span> Reset Trip
+                        </button>
+                    </div>
+                    <div class="sim-status" id="simStatus">Ready to simulate</div>
+                </div>
+
+                <!-- Event Log -->
+                <div class="card">
+                    <div class="card-title">📋 Event Log</div>
+                    <ul class="event-list" id="eventList">
+                        <li class="event-empty">No events yet. Run a simulation!</li>
+                    </ul>
+                </div>
+
+            </aside>
+
+            <!-- Map -->
+            <div class="map-container">
+                <div id="map"></div>
+                <div class="map-legend">
+                    <h4>Legend</h4>
+                    <div class="legend-item">
+                        <span class="legend-dot" style="background: rgba(59,130,246,0.4); border: 2px solid #3b82f6;"></span>
+                        Pickup Geofence (50m)
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-dot" style="background: rgba(34,197,94,0.4); border: 2px solid #22c55e;"></span>
+                        Office Geofence (100m)
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-line" style="background: #f59e0b;"></span>
+                        Vehicle Route
+                    </div>
+                    <div class="legend-item">
+                        <span style="font-size: 16px;">🚐</span>
+                        Vehicle Position
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toasts" class="toast-container"></div>
+
+    <script>
+        // ===== State =====
+        let map, vehicleMarker, routeLine, pickupCircle, officeCircle;
+        let pickupLabel, officeLabel;
+        let previousEventCount = 0;
+        let isSimulating = false;
+        let refreshInterval;
+
+        // ===== Initialize Map =====
+        function initMap() {
+            map = L.map('map', {
+                zoomControl: true,
+                attributionControl: true
+            }).setView([12.9618, 77.5848], 14);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a>',
+                maxZoom: 19
+            }).addTo(map);
+        }
+
+        // ===== Toast Notifications =====
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toasts');
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.innerHTML = message;
+            container.appendChild(toast);
+            setTimeout(() => { if (toast.parentNode) toast.remove(); }, 4000);
+        }
+
+        // ===== Format Time =====
+        function formatTime(isoString) {
+            if (!isoString) return '—';
+            const d = new Date(isoString);
+            return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        }
+
+        // ===== Update Dashboard =====
+        async function refreshDashboard() {
+            try {
+                const res = await fetch('/api/dashboard/data');
+                if (!res.ok) throw new Error('API error');
+                const data = await res.json();
+
+                setConnected(true);
+                updateTripInfo(data);
+                updatePickupInfo(data);
+                updateStats(data);
+                updateMap(data);
+                updateEvents(data);
+            } catch (err) {
+                setConnected(false);
+                console.error('Dashboard refresh failed:', err);
+            }
+        }
+
+        function setConnected(connected) {
+            const dot = document.getElementById('statusDot');
+            const text = document.getElementById('statusText');
+            if (connected) {
+                dot.className = 'status-dot connected';
+                text.textContent = 'Connected';
+            } else {
+                dot.className = 'status-dot disconnected';
+                text.textContent = 'Disconnected';
+            }
+        }
+
+        // ===== Update Sidebar Sections =====
+        function updateTripInfo(data) {
+            if (data.trips.length === 0) return;
+            const trip = data.trips[0];
+
+            document.getElementById('tripId').textContent = '#' + trip.id;
+            document.getElementById('vehicleReg').textContent = trip.vehicleReg;
+            document.getElementById('tripStart').textContent = formatTime(trip.startTime);
+            document.getElementById('tripEnd').textContent = trip.endTime ? formatTime(trip.endTime) : '—';
+
+            const statusEl = document.getElementById('tripStatus');
+            if (trip.status === 'COMPLETED') {
+                statusEl.innerHTML = '<span class="badge badge-completed">✓ Completed</span>';
+            } else {
+                statusEl.innerHTML = '<span class="badge badge-progress">● In Progress</span>';
+            }
+        }
+
+        function updatePickupInfo(data) {
+            if (data.pickupPoints.length === 0) return;
+            const pp = data.pickupPoints[0];
+
+            document.getElementById('pickupCoords').textContent =
+                pp.latitude.toFixed(4) + ', ' + pp.longitude.toFixed(4);
+            document.getElementById('pickupRadius').textContent = pp.radiusMeters + 'm';
+
+            const statusEl = document.getElementById('pickupStatus');
+            if (pp.status === 'ARRIVED') {
+                statusEl.innerHTML = '<span class="badge badge-arrived">✓ Arrived</span>';
+            } else {
+                statusEl.innerHTML = '<span class="badge badge-pending">● Pending</span>';
+            }
+        }
+
+        function updateStats(data) {
+            const logs = data.locationLogs;
+            document.getElementById('statPings').textContent = logs.length;
+            document.getElementById('statEvents').textContent = data.events.length;
+
+            if (logs.length > 0) {
+                const latest = logs[logs.length - 1];
+                document.getElementById('statSpeed').textContent = latest.speed.toFixed(0) + ' km/h';
+                document.getElementById('statPosition').textContent =
+                    latest.latitude.toFixed(3) + ', ' + latest.longitude.toFixed(3);
+            } else {
+                document.getElementById('statSpeed').textContent = '—';
+                document.getElementById('statPosition').textContent = '—';
+            }
+        }
+
+        // ===== Update Map =====
+        function updateMap(data) {
+            // Pickup geofence circle
+            if (data.pickupPoints.length > 0 && !pickupCircle) {
+                const pp = data.pickupPoints[0];
+                pickupCircle = L.circle([pp.latitude, pp.longitude], {
+                    radius: pp.radiusMeters,
+                    color: '#3b82f6',
+                    fillColor: '#3b82f6',
+                    fillOpacity: 0.12,
+                    weight: 2,
+                    dashArray: '6, 4'
+                }).addTo(map);
+
+                pickupLabel = L.marker([pp.latitude, pp.longitude], {
+                    icon: L.divIcon({
+                        html: '<div style="font-size:22px; filter: drop-shadow(0 1px 3px rgba(0,0,0,0.6))">📍</div>',
+                        className: 'emoji-marker',
+                        iconSize: [30, 30],
+                        iconAnchor: [15, 15]
+                    })
+                }).addTo(map).bindPopup(
+                    '<b>Pickup Point</b><br>Lat: ' + pp.latitude + '<br>Lon: ' + pp.longitude +
+                    '<br>Radius: ' + pp.radiusMeters + 'm<br>Status: ' + pp.status
+                );
+            }
+            // Update pickup popup status
+            if (data.pickupPoints.length > 0 && pickupLabel) {
+                const pp = data.pickupPoints[0];
+                pickupLabel.setPopupContent(
+                    '<b>Pickup Point</b><br>Lat: ' + pp.latitude + '<br>Lon: ' + pp.longitude +
+                    '<br>Radius: ' + pp.radiusMeters + 'm<br>Status: <b>' + pp.status + '</b>'
+                );
+            }
+
+            // Office geofence circle
+            if (data.officeGeofences.length > 0 && !officeCircle) {
+                const of = data.officeGeofences[0];
+                officeCircle = L.circle([of.latitude, of.longitude], {
+                    radius: of.radiusMeters,
+                    color: '#22c55e',
+                    fillColor: '#22c55e',
+                    fillOpacity: 0.12,
+                    weight: 2,
+                    dashArray: '6, 4'
+                }).addTo(map);
+
+                officeLabel = L.marker([of.latitude, of.longitude], {
+                    icon: L.divIcon({
+                        html: '<div style="font-size:22px; filter: drop-shadow(0 1px 3px rgba(0,0,0,0.6))">🏢</div>',
+                        className: 'emoji-marker',
+                        iconSize: [30, 30],
+                        iconAnchor: [15, 15]
+                    })
+                }).addTo(map).bindPopup(
+                    '<b>Office</b><br>Lat: ' + of.latitude + '<br>Lon: ' + of.longitude +
+                    '<br>Radius: ' + of.radiusMeters + 'm'
+                );
+            }
+
+            // Route trail
+            if (data.locationLogs.length > 0) {
+                const points = data.locationLogs.map(l => [l.latitude, l.longitude]);
+
+                if (routeLine) map.removeLayer(routeLine);
+                routeLine = L.polyline(points, {
+                    color: '#f59e0b',
+                    weight: 3.5,
+                    opacity: 0.85,
+                    lineJoin: 'round'
+                }).addTo(map);
+
+                // Vehicle marker at latest position
+                const latest = data.locationLogs[data.locationLogs.length - 1];
+                const latLng = [latest.latitude, latest.longitude];
+
+                if (!vehicleMarker) {
+                    vehicleMarker = L.marker(latLng, {
+                        icon: L.divIcon({
+                            html: '<div class="vehicle-marker">🚐</div>',
+                            className: 'vehicle-icon',
+                            iconSize: [36, 36],
+                            iconAnchor: [18, 18]
+                        }),
+                        zIndexOffset: 1000
+                    }).addTo(map).bindPopup('');
+                }
+                vehicleMarker.setLatLng(latLng);
+                vehicleMarker.setPopupContent(
+                    '<b>Vehicle</b><br>Speed: ' + latest.speed.toFixed(1) + ' km/h' +
+                    '<br>Lat: ' + latest.latitude.toFixed(5) +
+                    '<br>Lon: ' + latest.longitude.toFixed(5)
+                );
+            } else if (vehicleMarker) {
+                map.removeLayer(vehicleMarker);
+                vehicleMarker = null;
+            }
+        }
+
+        // ===== Update Events =====
+        function updateEvents(data) {
+            const list = document.getElementById('eventList');
+            const events = data.events;
+
+            if (events.length === 0) {
+                list.innerHTML = '<li class="event-empty">No events yet. Run a simulation!</li>';
+            } else {
+                list.innerHTML = events.map(e => {
+                    const isPickup = e.eventType === 'PICKUP_ARRIVED';
+                    return `
+                        <li class="event-item ${isPickup ? 'pickup' : 'completed'}">
+                            <span class="event-icon">${isPickup ? '📍' : '🏢'}</span>
+                            <div class="event-details">
+                                <div class="event-type">${isPickup ? 'Pickup Arrived' : 'Trip Completed'}</div>
+                                <div class="event-time">${formatTime(e.timestamp)} · Trip #${e.tripId}</div>
+                            </div>
+                        </li>`;
+                }).join('');
+            }
+
+            // Toast for new events
+            if (events.length > previousEventCount && previousEventCount > 0) {
+                const newEvents = events.slice(0, events.length - previousEventCount);
+                newEvents.forEach(e => {
+                    if (e.eventType === 'PICKUP_ARRIVED') {
+                        showToast('📍 Vehicle arrived at pickup point!', 'info');
+                    } else {
+                        showToast('🏢 Trip completed automatically!', 'success');
+                    }
+                });
+            }
+            previousEventCount = events.length;
+        }
+
+        // ===== Simulation Helpers =====
+        async function sendLocationPing(lat, lng, speed) {
+            const body = {
+                vehicleId: 1,
+                tripId: 1,
+                latitude: lat,
+                longitude: lng,
+                speed: speed,
+                timestamp: new Date().toISOString().replace('Z', '')
+            };
+            const res = await fetch('/api/location/update', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.message || 'API error');
+            }
+        }
+
+        function setSimulating(active, message) {
+            isSimulating = active;
+            const status = document.getElementById('simStatus');
+            const btns = document.querySelectorAll('.sim-btn');
+
+            if (active) {
+                status.textContent = message || 'Simulating...';
+                status.className = 'sim-status active';
+                btns.forEach(b => b.disabled = true);
+            } else {
+                status.textContent = message || 'Ready to simulate';
+                status.className = 'sim-status';
+                btns.forEach(b => b.disabled = false);
+            }
+        }
+
+        function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+        // ===== Simulation Actions =====
+        async function simulatePickup() {
+            try {
+                setSimulating(true, '📍 Sending pickup location...');
+                await sendLocationPing(12.9520, 77.5750, 2);
+                await sleep(500);
+                await refreshDashboard();
+                setSimulating(false, '✓ Pickup ping sent!');
+                showToast('📍 GPS ping sent at pickup location', 'info');
+            } catch (err) {
+                setSimulating(false, '✗ Error: ' + err.message);
+                showToast('Error: ' + err.message, 'error');
+            }
+        }
+
+        async function simulateDrive() {
+            const route = [
+                { lat: 12.9535, lng: 77.5770, speed: 20 },
+                { lat: 12.9555, lng: 77.5795, speed: 32 },
+                { lat: 12.9575, lng: 77.5815, speed: 38 },
+                { lat: 12.9598, lng: 77.5838, speed: 42 },
+                { lat: 12.9620, lng: 77.5858, speed: 40 },
+                { lat: 12.9642, lng: 77.5878, speed: 35 },
+                { lat: 12.9660, lng: 77.5898, speed: 30 },
+                { lat: 12.9678, lng: 77.5915, speed: 22 },
+                { lat: 12.9695, lng: 77.5932, speed: 15 },
+                { lat: 12.9708, lng: 77.5942, speed: 8  },
+            ];
+
+            try {
+                setSimulating(true, '🚗 Driving to office...');
+                for (let i = 0; i < route.length; i++) {
+                    const wp = route[i];
+                    setSimulating(true, `🚗 Driving... (${i + 1}/${route.length}) — ${wp.speed} km/h`);
+                    await sendLocationPing(wp.lat, wp.lng, wp.speed);
+                    await sleep(800);
+                    await refreshDashboard();
+                }
+                setSimulating(false, '✓ Arrived near office!');
+                showToast('🚗 Vehicle drove to office area', 'warning');
+            } catch (err) {
+                setSimulating(false, '✗ Error: ' + err.message);
+                showToast('Error: ' + err.message, 'error');
+            }
+        }
+
+        async function simulateOffice() {
+            try {
+                setSimulating(true, '🏢 Arriving at office (speed < 5)...');
+                await sendLocationPing(12.9716, 77.5946, 2);
+                await sleep(500);
+                await refreshDashboard();
+                setSimulating(false, '✓ Office arrival ping sent!');
+                showToast('🏢 GPS ping sent at office (speed: 2 km/h)', 'success');
+            } catch (err) {
+                setSimulating(false, '✗ Error: ' + err.message);
+                showToast('Error: ' + err.message, 'error');
+            }
+        }
+
+        async function resetTrip() {
+            try {
+                setSimulating(true, '🔄 Resetting trip...');
+                const res = await fetch('/api/dashboard/reset', { method: 'POST' });
+                const data = await res.json();
+
+                if (data.success) {
+                    // Clear map elements
+                    if (vehicleMarker) { map.removeLayer(vehicleMarker); vehicleMarker = null; }
+                    if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+                    previousEventCount = 0;
+
+                    await refreshDashboard();
+                    setSimulating(false, '✓ Trip reset! Ready to simulate again.');
+                    showToast('🔄 Trip has been reset', 'warning');
+                } else {
+                    throw new Error(data.message);
+                }
+            } catch (err) {
+                setSimulating(false, '✗ Error: ' + err.message);
+                showToast('Error: ' + err.message, 'error');
+            }
+        }
+
+        // ===== Auto-Refresh Toggle =====
+        document.getElementById('autoRefresh').addEventListener('change', function() {
+            if (this.checked) {
+                refreshInterval = setInterval(() => {
+                    if (!isSimulating) refreshDashboard();
+                }, 2000);
+            } else {
+                clearInterval(refreshInterval);
+            }
+        });
+
+        // ===== Init =====
+        initMap();
+        refreshDashboard();
+        refreshInterval = setInterval(() => {
+            if (!isSimulating) refreshDashboard();
+        }, 2000);
+    </script>
+</body>
+</html>
