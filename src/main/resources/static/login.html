@@ -50,6 +50,14 @@
         }
 
         /* ── Logo / Header ────────────────────────────────────────────── */
+        /* Delete or ignore the old .logo-icon class if you aren't using it anymore */
+
+.logo-img {
+    height: 45px;       /* Adjust this to match your text height */
+    width: auto;        /* Maintains aspect ratio */
+    margin-right: 12px; /* Space between logo and text */
+    object-fit: contain;
+}
         .logo-row {
             display: flex;
             align-items: center;
@@ -194,13 +202,22 @@
 <div class="card">
 
     <!-- Logo -->
-    <div class="logo-row">
+    <!-- <div class="logo-row">
         <div class="logo-icon">🚌</div>
         <div>
             <div class="logo-text">MoveInSync</div>
-            <div class="logo-sub">Vehicle Tracking System</div>
+            <div class="logo-sub">Vehicle Tracking & Geofence-Based Auto Trip Closure System</div>
         </div>
+    </div> -->
+
+    <div class="logo-row">
+    <img src="image.png" alt="MoveInSync Logo" class="logo-img">
+    
+    <div>
+        <div class="logo-text">MoveInSync</div>
+        <div class="logo-sub">Vehicle Tracking & Geofence-Based Auto Trip Closure System</div>
     </div>
+</div>
 
     <div class="divider"></div>
 
@@ -252,11 +269,6 @@
             <span class="spinner"></span>
         </button>
     </form>
-
-    <div class="footer-note">
-        ⚠️ Simulated authentication — for academic demonstration only.<br>
-        No real encryption or token validation is used.
-    </div>
 
 </div>
 
