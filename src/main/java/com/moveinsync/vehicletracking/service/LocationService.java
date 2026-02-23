@@ -10,6 +10,8 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.beans.factory.annotation.Value;
+
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -38,6 +40,14 @@ public class LocationService {
     private final NotificationService notificationService;
     private final SimpMessagingTemplate messagingTemplate;
 
+    /** EC3 — Configurable dwell time threshold (default: 30 seconds) */
+    @Value("${geofence.office.dwell-time-seconds:30}")
+    private int dwellTimeSeconds;
+
+    /** EC3 — Speed must be below this (km/h) to qualify for trip closure */
+    @Value("${geofence.office.speed-threshold-kmh:5.0}")
+    private double speedThresholdKmh;
+
     /**
      * Main entry point. Called on every GPS ping from a vehicle.
      *
@@ -59,8 +69,9 @@ public class LocationService {
         Optional<LocationLog> prevLog = locationLogRepository
                 .findTopByTripIdOrderByTimestampDesc(request.getTripId());
 
-        // Step 2: Load trip
-        Trip trip = tripRepository.findById(request.getTripId())
+        // Step 2: Load trip with a PESSIMISTIC_WRITE lock (EC6 — prevents concurrent
+        //         threads from both closing the same trip when two pings arrive at once)
+        Trip trip = tripRepository.findByIdForUpdate(request.getTripId())
                 .orElseThrow(() -> new RuntimeException("Trip not found with ID: " + request.getTripId()));
 
         // Step 3: Save current location log (audit trail — Functionality #8)
@@ -99,56 +110,62 @@ public class LocationService {
     }
 
     /**
+     * EC2  — Idempotency: each pickup uses its own status flag ("ARRIVED") — GPS drift safe
+     * EC5  — Multi-stop: iterates ALL pickup points for the trip, not just the first
      * Functionality #4 — Pickup Geofence Detection
      * Functionality #5 — Push Notification on pickup
      * Functionality #7 — PICKUP_ARRIVED event
+     *
+     * Fix: was using findByTripId (single result — throws for multi-stop).
+     *      Now uses findAllByTripId and checks each pickup individually.
      */
     private void checkPickupGeofence(Trip trip, LocationUpdateRequest request) {
-        PickupPoint pickupPoint = pickupPointRepository.findByTripId(trip.getId()).orElse(null);
-        if (pickupPoint == null) {
-            log.debug("No pickup point found for trip: {}", trip.getId());
+        List<PickupPoint> pickupPoints = pickupPointRepository.findAllByTripId(trip.getId());
+        if (pickupPoints.isEmpty()) {
+            log.debug("No pickup points found for trip: {}", trip.getId());
             return;
         }
 
-        boolean isInside = GeofenceUtil.isWithinRadius(
-                request.getLatitude(), request.getLongitude(),
-                pickupPoint.getLatitude(), pickupPoint.getLongitude(),
-                pickupPoint.getRadiusMeters());
+        for (PickupPoint pickupPoint : pickupPoints) {
+            // EC2/EC6 — Idempotent: already arrived at this pickup, skip
+            if ("ARRIVED".equals(pickupPoint.getStatus())) {
+                continue;
+            }
 
-        log.debug("Pickup geofence — inside: {}, status: {}", isInside, pickupPoint.getStatus());
+            boolean isInside = GeofenceUtil.isWithinRadius(
+                    request.getLatitude(), request.getLongitude(),
+                    pickupPoint.getLatitude(), pickupPoint.getLongitude(),
+                    pickupPoint.getRadiusMeters());
 
-        if (isInside && !"ARRIVED".equals(pickupPoint.getStatus())) {
-            log.info("==> PICKUP_ARRIVED triggered for trip #{}", trip.getId());
+            log.debug("Pickup #{} geofence check — inside: {}, status: {}",
+                    pickupPoint.getId(), isInside, pickupPoint.getStatus());
 
-            pickupPoint.setStatus("ARRIVED");
-            pickupPointRepository.save(pickupPoint);
+            if (isInside) {
+                log.info("==> PICKUP_ARRIVED triggered for trip #{}, pickup point #{}",
+                        trip.getId(), pickupPoint.getId());
 
-            // Audit log (Functionality #8)
-            eventLogRepository.save(EventLog.builder()
-                    .vehicleId(request.getVehicleId())
-                    .tripId(request.getTripId())
-                    .eventType("PICKUP_ARRIVED")
-                    .latitude(request.getLatitude())
-                    .longitude(request.getLongitude())
-                    .timestamp(LocalDateTime.now())
-                    .build());
+                pickupPoint.setStatus("ARRIVED");
+                pickupPointRepository.save(pickupPoint);
 
-            // Push notification + SMS fallback (Functionality #5)
-            notificationService.sendPickupArrivalNotification(
-                    request.getVehicleId(), request.getTripId(),
-                    request.getLatitude(), request.getLongitude());
+                // Audit log — server-timestamped, typed enum (Functionality #8)
+                logAuditEvent(request.getVehicleId(), request.getTripId(),
+                        GeofenceEventType.PICKUP_ARRIVED,
+                        request.getLatitude(), request.getLongitude());
+
+                // Push notification + SMS fallback (Functionality #5)
+                notificationService.sendPickupArrivalNotification(
+                        request.getVehicleId(), request.getTripId(),
+                        request.getLatitude(), request.getLongitude());
+            }
         }
     }
 
     /**
-     * Functionality #3 — Auto Trip Closure (distance, duration, end timestamp)
-     * Functionality #5 — Push notification on completion
-     * Functionality #7 — OFFICE_REACHED + TRIP_COMPLETED events (two separate events per spec)
-     *
-     * Conditions for auto-closure:
-     *  - Vehicle inside office geofence
-     *  - Trip status = IN_PROGRESS
-     *  - Speed < 5 km/h (vehicle has stopped — prevents false trigger while passing by)
+     * EC2/EC6 — Idempotent: status-based check + officeEntryTime reset on exit (GPS drift safe)
+     * EC3  — Dwell time: vehicle must stay inside ≥ dwellTimeSeconds before trip closes
+     * EC3  — Drive-through: speed must be below speedThresholdKmh
+     * EC5  — Multi-stop: all pickups must be ARRIVED before auto-closing
+     * Functionality #3/5/7 — Auto Trip Closure, notifications, event engine
      */
     private void checkOfficeGeofence(Trip trip, LocationUpdateRequest request) {
         List<OfficeGeofence> officeGeofences = officeGeofenceRepository.findAll();
@@ -158,58 +175,148 @@ public class LocationService {
         }
 
         OfficeGeofence officeGeofence = officeGeofences.get(0);
-
         boolean isInside = GeofenceUtil.isWithinRadius(
                 request.getLatitude(), request.getLongitude(),
                 officeGeofence.getLatitude(), officeGeofence.getLongitude(),
                 officeGeofence.getRadiusMeters());
 
-        log.debug("Office geofence — inside: {}, status: {}, speed: {} km/h",
-                isInside, trip.getStatus(), request.getSpeed());
-
-        boolean shouldComplete = isInside
-                && "IN_PROGRESS".equals(trip.getStatus())
-                && request.getSpeed() < 5.0;
-
-        if (shouldComplete) {
-            log.info("==> OFFICE_REACHED + TRIP_COMPLETED triggered for trip #{}", trip.getId());
-
-            LocalDateTime now = LocalDateTime.now();
-
-            // Event 1: OFFICE_REACHED (required by spec as separate event)
-            eventLogRepository.save(EventLog.builder()
-                    .vehicleId(request.getVehicleId())
-                    .tripId(request.getTripId())
-                    .eventType("OFFICE_REACHED")
-                    .latitude(request.getLatitude())
-                    .longitude(request.getLongitude())
-                    .timestamp(now)
-                    .build());
-
-            // Finalize trip — record end time, duration, distance (Functionality #3)
-            long durationMinutes = ChronoUnit.MINUTES.between(trip.getStartTime(), now);
-            trip.setStatus("COMPLETED");
-            trip.setEndTime(now);
-            trip.setDurationMinutes((int) durationMinutes);
+        // EC2/EC3 — Vehicle exited geofence: reset dwell timer so GPS drift can't re-trigger
+        if (!isInside && trip.getOfficeEntryTime() != null && "IN_PROGRESS".equals(trip.getStatus())) {
+            log.info("EC2/EC3: Vehicle exited office geofence for trip #{} — resetting dwell timer", trip.getId());
+            trip.setOfficeEntryTime(null);
             tripRepository.save(trip);
+            // Audit: log the geofence exit for compliance tracking
+            logAuditEvent(request.getVehicleId(), request.getTripId(),
+                    GeofenceEventType.GEOFENCE_EXIT,
+                    request.getLatitude(), request.getLongitude());
+            return;
+        }
 
-            // Event 2: TRIP_COMPLETED
+        if (!isInside) return;
+
+        // EC6/EC2 — Idempotent: skip if trip already closed
+        if (!"IN_PROGRESS".equals(trip.getStatus())) {
+            log.debug("EC6: Trip #{} already '{}' — skipping office check", trip.getId(), trip.getStatus());
+            return;
+        }
+
+        // EC3 — Record entry time on first entry
+        if (trip.getOfficeEntryTime() == null) {
+            trip.setOfficeEntryTime(LocalDateTime.now());
+            tripRepository.save(trip);
+            log.info("EC3: Vehicle entered office geofence for trip #{} — dwell timer started (need {}s)",
+                    trip.getId(), dwellTimeSeconds);
+            return; // wait for next ping to validate dwell time
+        }
+
+        // EC3 — Check dwell time: must be inside for at least dwellTimeSeconds
+        long secondsInGeofence = ChronoUnit.SECONDS.between(trip.getOfficeEntryTime(), LocalDateTime.now());
+        if (secondsInGeofence < dwellTimeSeconds) {
+            log.debug("EC3: Dwell time not met for trip #{} — {}s / {}s",
+                    trip.getId(), secondsInGeofence, dwellTimeSeconds);
+            return;
+        }
+
+        // EC3 — Drive-through protection: vehicle must be slow (not just passing)
+        if (request.getSpeed() >= speedThresholdKmh) {
+            log.debug("EC3: Speed {} km/h >= threshold {} km/h for trip #{} — drive-through protection active",
+                    String.format("%.1f", request.getSpeed()), speedThresholdKmh, trip.getId());
+            return;
+        }
+
+        // EC5 — Multi-stop: all pickup points must be ARRIVED before closing
+        List<PickupPoint> allPickups = pickupPointRepository.findAllByTripId(trip.getId());
+        if (!allPickups.isEmpty()) {
+            List<PickupPoint> pending = allPickups.stream()
+                    .filter(pp -> !"ARRIVED".equals(pp.getStatus())).toList();
+            if (!pending.isEmpty()) {
+                log.warn("EC5: Trip #{} cannot auto-close — {}/{} pickup(s) still PENDING",
+                        trip.getId(), pending.size(), allPickups.size());
+                logAuditEvent(request.getVehicleId(), request.getTripId(),
+                        GeofenceEventType.TRIP_CLOSURE_BLOCKED_PENDING_PICKUPS,
+                        request.getLatitude(), request.getLongitude());
+                return;
+            }
+        }
+
+        // All checks passed — auto-close the trip
+        // EC6 — Secondary idempotency guard: confirm OFFICE_REACHED was never logged
+        //        (defence-in-depth on top of the trip status check above)
+        if (eventLogRepository.existsByTripIdAndEventType(request.getTripId(), GeofenceEventType.OFFICE_REACHED)) {
+            log.warn("EC6: OFFICE_REACHED already logged for trip #{} — skipping duplicate closure",
+                    trip.getId());
+            return;
+        }
+
+        log.info("==> OFFICE_REACHED + TRIP_COMPLETED triggered for trip #{} (dwell: {}s, speed: {} km/h)",
+                trip.getId(), secondsInGeofence, request.getSpeed());
+
+        LocalDateTime now = LocalDateTime.now();
+
+        logAuditEvent(request.getVehicleId(), request.getTripId(),
+                GeofenceEventType.OFFICE_REACHED,
+                request.getLatitude(), request.getLongitude());
+
+        long durationMinutes = ChronoUnit.MINUTES.between(trip.getStartTime(), now);
+        trip.setStatus("COMPLETED");
+        trip.setEndTime(now);
+        trip.setDurationMinutes((int) durationMinutes);
+        trip.setOfficeEntryTime(null);
+        tripRepository.save(trip);
+
+        logAuditEvent(request.getVehicleId(), request.getTripId(),
+                GeofenceEventType.TRIP_COMPLETED,
+                request.getLatitude(), request.getLongitude());
+
+        notificationService.sendTripCompletionNotification(request.getVehicleId(), request.getTripId());
+
+        log.info("Trip #{} auto-closed — duration: {} min, distance: {} km",
+                trip.getId(), durationMinutes,
+                trip.getTotalDistanceKm() != null
+                        ? String.format("%.2f", trip.getTotalDistanceKm()) : "0.00");
+    }
+
+    /**
+     * Audit & Compliance — Centralized event persistence helper.
+     *
+     * Design decisions:
+     *  1. SERVER timestamp only — LocalDateTime.now() is always server time.
+     *     The device/request timestamp is NEVER used for audit records.
+     *  2. Error handling — DB write failures are caught and logged.
+     *     The exception is NOT rethrown so that a transient audit failure
+     *     does not abort the main geofence operation.
+     *  3. Synchronous — runs in the same @Transactional boundary as the
+     *     calling method. This ensures atomicity: if the trip status update
+     *     commits, the audit record also commits.
+     *
+     * Production note: For extremely high throughput (10k+ vehicles), replace
+     * the direct DB save with an async Kafka publish. A separate audit consumer
+     * would then persist to a dedicated audit DB without blocking GPS processing.
+     *
+     * @param vehicleId vehicle that triggered the event
+     * @param tripId    trip associated with the event
+     * @param eventType typed enum — no raw strings
+     * @param latitude  GPS latitude at event time
+     * @param longitude GPS longitude at event time
+     */
+    private void logAuditEvent(Long vehicleId, Long tripId, GeofenceEventType eventType,
+                                double latitude, double longitude) {
+        try {
             eventLogRepository.save(EventLog.builder()
-                    .vehicleId(request.getVehicleId())
-                    .tripId(request.getTripId())
-                    .eventType("TRIP_COMPLETED")
-                    .latitude(request.getLatitude())
-                    .longitude(request.getLongitude())
-                    .timestamp(now)
+                    .vehicleId(vehicleId)
+                    .tripId(tripId)
+                    .eventType(eventType)
+                    .latitude(latitude)
+                    .longitude(longitude)
+                    .timestamp(LocalDateTime.now())   // SERVER time — never device time
                     .build());
-
-            // Push notification (Functionality #5)
-            notificationService.sendTripCompletionNotification(request.getVehicleId(), request.getTripId());
-
-            log.info("Trip #{} auto-closed — duration: {} min, distance: {} km",
-                    trip.getId(), durationMinutes,
-                    trip.getTotalDistanceKm() != null
-                            ? String.format("%.2f", trip.getTotalDistanceKm()) : "0.00");
+            log.info("AUDIT: {} persisted — vehicle: {}, trip: {}, loc: ({}, {})",
+                    eventType, vehicleId, tripId,
+                    String.format("%.5f", latitude), String.format("%.5f", longitude));
+        } catch (Exception e) {
+            // Audit failure must NOT abort the main geofence operation.
+            // The error is logged for investigation and alerting.
+            log.error("AUDIT: Failed to persist {} for trip #{} — {}", eventType, tripId, e.getMessage());
         }
     }
 

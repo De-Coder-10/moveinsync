@@ -168,10 +168,11 @@ public class DashboardApiController {
                     m.put("id", e.getId());
                     m.put("vehicleId", e.getVehicleId());
                     m.put("tripId", e.getTripId());
-                    m.put("eventType", e.getEventType());
+                    m.put("eventType", e.getEventType() != null ? e.getEventType().name() : null);
                     m.put("latitude", e.getLatitude());
                     m.put("longitude", e.getLongitude());
                     m.put("timestamp", e.getTimestamp().toString());
+                    m.put("createdAt", e.getCreatedAt() != null ? e.getCreatedAt().toString() : null);
                     return m;
                 }).toList();
         data.put("events", events);
@@ -210,13 +211,16 @@ public class DashboardApiController {
         trip.setStartTime(LocalDateTime.now());
         trip.setTotalDistanceKm(null);
         trip.setDurationMinutes(null);
+        trip.setOfficeEntryTime(null); // EC3: clear dwell timer on reset
         tripRepository.save(trip);
 
-        // Reset pickup point
-        pickupPointRepository.findByTripId(tripId).ifPresent(pp -> {
+        // Reset all pickup points for this trip (supports multi-stop — EC5)
+        List<PickupPoint> pickups = pickupPointRepository.findAllByTripId(tripId);
+        pickups.forEach(pp -> {
             pp.setStatus("PENDING");
             pickupPointRepository.save(pp);
         });
+        log.info("Reset {} pickup point(s) to PENDING for trip {}", pickups.size(), tripId);
 
         log.info("Trip {} reset successfully", tripId);
 

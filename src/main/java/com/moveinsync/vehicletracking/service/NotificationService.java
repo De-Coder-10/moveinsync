@@ -47,4 +47,17 @@ public class NotificationService {
         log.info("[SMS FALLBACK] Sending SMS: 'Your trip has been completed. Have a great day!'");
         log.info("================================================================");
     }
+
+    /**
+     * EC4 — Admin Alert: manual trip closure outside geofence
+     * In production: sends alert to operations dashboard / PagerDuty / Slack
+     */
+    public void sendAdminAlert(Long vehicleId, Long tripId, String reason) {
+        log.warn("================================================================");
+        log.warn("[ADMIN ALERT] 🚨 EC4: Trip #{} closed OUTSIDE office geofence!", tripId);
+        log.warn("[ADMIN ALERT] Vehicle ID: {}, Reason: {}", vehicleId, reason);
+        log.warn("[ADMIN ALERT] Operations team notified for compliance review.");
+        log.warn("================================================================");
+        // TODO (Production): Slack webhook / PagerDuty alert
+    }
 }

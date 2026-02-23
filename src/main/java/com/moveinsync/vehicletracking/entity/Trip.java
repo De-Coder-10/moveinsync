@@ -39,4 +39,8 @@ public class Trip {
     // Duration of trip in minutes (set on trip completion)
     private Integer durationMinutes;
 
+    // EC3 — Dwell time: records when vehicle first entered office geofence
+    // Reset to null if vehicle exits (prevents GPS drift false trigger - EC2)
+    private LocalDateTime officeEntryTime;
+
 }

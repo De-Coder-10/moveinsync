@@ -4,6 +4,7 @@ import com.moveinsync.vehicletracking.entity.PickupPoint;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -11,9 +12,10 @@ import java.util.Optional;
  */
 @Repository
 public interface PickupPointRepository extends JpaRepository<PickupPoint, Long> {
-    
-    /**
-     * Find pickup point by trip ID
-     */
+
+    /** Single pickup for a trip (used in geofence arrival check) */
     Optional<PickupPoint> findByTripId(Long tripId);
+
+    /** EC5 — All pickups for a trip (used in multi-stop validation before trip closure) */
+    List<PickupPoint> findAllByTripId(Long tripId);
 }
