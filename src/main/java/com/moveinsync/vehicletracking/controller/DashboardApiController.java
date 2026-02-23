@@ -188,7 +188,26 @@ public class DashboardApiController {
     }
 
     /**
-     * Resets ALL trips so the auto-simulation can re-run from the start.
+     * Starts the simulation for a specific trip.
+     * Fetches the OSRM road route and begins advancing the vehicle automatically.
+     * The trip ends automatically when it enters the office geofence.
+     */
+    @PostMapping("/start-trip/{tripId}")
+    public ResponseEntity<ApiResponse> startTrip(@PathVariable Long tripId) {
+        boolean started = autoSimulationService.startTrip(tripId);
+        if (started) {
+            log.info("Trip #{} started via dashboard API", tripId);
+            return ResponseEntity.ok(
+                    ApiResponse.builder().success(true)
+                            .message("Trip #" + tripId + " started successfully").build());
+        }
+        return ResponseEntity.badRequest().body(
+                ApiResponse.builder().success(false)
+                        .message("Trip #" + tripId + " not found").build());
+    }
+
+    /**
+     * Resets ALL trips back to PENDING so they can be started manually again.
      */
     @PostMapping("/reset")
     @Transactional
@@ -210,9 +229,9 @@ public class DashboardApiController {
             locationLogRepository.deleteAll(locationLogRepository.findByTripIdOrderByTimestampAsc(tripId));
             eventLogRepository.deleteAll(eventLogRepository.findByTripId(tripId));
 
-            trip.setStatus("IN_PROGRESS");
+            trip.setStatus("PENDING");
             trip.setEndTime(null);
-            trip.setStartTime(LocalDateTime.now());
+            trip.setStartTime(null);
             trip.setTotalDistanceKm(null);
             trip.setDurationMinutes(null);
             trip.setOfficeEntryTime(null);

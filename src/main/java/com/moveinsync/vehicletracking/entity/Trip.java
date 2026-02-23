@@ -28,7 +28,7 @@ public class Trip {
     @Column(nullable = false)
     private String status; // CREATED, IN_PROGRESS, COMPLETED
 
-    @Column(nullable = false)
+    @Column(nullable = true)
     private LocalDateTime startTime;
 
     private LocalDateTime endTime;

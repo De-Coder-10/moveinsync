@@ -695,8 +695,8 @@ let vehicleTrails   = {};   // vehicleId → Leaflet polyline
 let trailPoints     = {};   // vehicleId → [[lat,lng],...]
 let pickupCircles   = {};   // pickupId  → Leaflet circle
 let officeCircles   = {};   // officeId  → Leaflet circle
-
-let roadRouteLayer = null, roadRouteWaypoints = [];
+let roadRouteLayers = {};   // vehicleId → Leaflet polyline (planned road route, auto-sim)
+let roadRouteLayer  = null, roadRouteWaypoints = [];  // simulate-tab single route
 let stompClient = null, wsConnected = false;
 let previousEventCount = 0, isSimulating = false;
 let pollInterval, simPingCount = 0;
@@ -907,6 +907,12 @@ function updateSpeedUI(speed) {
 // ═══════════════════════════════════════════════════
 function handleGeofenceEvent(ev) {
     switch (ev.eventType) {
+        case 'TRIP_STARTED':
+            toast(`▶ ${ev.vehicleReg} trip started — loading road route...`, 'info');
+            refreshDashboard();
+            // Draw planned road route overlay for this vehicle
+            loadVehicleRoadRoute(ev.vehicleId, ev.vehicleReg, ev.fromLat, ev.fromLng, ev.toLat, ev.toLng);
+            break;
         case 'PICKUP_ARRIVED':
             toast(`📍 ${ev.vehicleReg} arrived at pickup point!`, 'info');
             refreshDashboard();
@@ -919,14 +925,66 @@ function handleGeofenceEvent(ev) {
             if (evTab) switchTab('events', evTab);
             break;
         case 'TRIP_RESET':
-            toast(`🔄 ${ev.vehicleReg} restarted — new trip cycle beginning`, 'warn');
-            // Clear old trail for this vehicle
+            toast(`🔄 ${ev.vehicleReg} reset — ready to start again`, 'warn');
             const vId = ev.vehicleId;
-            if (vehicleTrails[vId])  { map.removeLayer(vehicleTrails[vId]);  delete vehicleTrails[vId];  }
-            if (vehicleMarkers[vId]) { map.removeLayer(vehicleMarkers[vId]); delete vehicleMarkers[vId]; }
-            if (trailPoints[vId])    { delete trailPoints[vId]; }
+            if (vehicleTrails[vId])      { map.removeLayer(vehicleTrails[vId]);      delete vehicleTrails[vId];      }
+            if (vehicleMarkers[vId])     { map.removeLayer(vehicleMarkers[vId]);     delete vehicleMarkers[vId];     }
+            if (trailPoints[vId])        { delete trailPoints[vId]; }
+            if (roadRouteLayers[vId])    { map.removeLayer(roadRouteLayers[vId]);    delete roadRouteLayers[vId];    }
             refreshDashboard();
             break;
+    }
+}
+
+// ═══════════════════════════════════════════════════
+// START TRIP — manually dispatches a trip
+// ═══════════════════════════════════════════════════
+async function startTrip(tripId, vehicleId, vehicleReg) {
+    try {
+        const btn = document.getElementById('startBtn-' + tripId);
+        if (btn) { btn.disabled = true; btn.textContent = 'Loading route...'; }
+        const res  = await fetch('/api/dashboard/start-trip/' + tripId, { method: 'POST' });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.message);
+        toast('▶ ' + vehicleReg + ' — fetching road route from OSRM...', 'info');
+        // Backend fires TRIP_STARTED event which calls loadVehicleRoadRoute via WS
+        await refreshDashboard();
+    } catch (e) {
+        toast('❌ ' + e.message, 'error');
+        const btn = document.getElementById('startBtn-' + tripId);
+        if (btn) { btn.disabled = false; btn.textContent = '▶ Start Trip'; }
+    }
+}
+
+// Pickup coords for each vehicle (must match backend ROUTE_STARTS)
+const VEHICLE_PICKUP = {
+    'KA01AB1234': [12.9520, 77.5750],
+    'MH02CD5678': [12.9050, 77.6020],
+    'TN03EF9012': [12.9780, 77.6450]
+};
+const OFFICE_COORDS = [12.9716, 77.5946];
+
+async function loadVehicleRoadRoute(vehicleId, vehicleReg, fromLat, fromLng, toLat, toLng) {
+    try {
+        const fLat = fromLat || (VEHICLE_PICKUP[vehicleReg] || [12.9520,77.5750])[0];
+        const fLng = fromLng || (VEHICLE_PICKUP[vehicleReg] || [12.9520,77.5750])[1];
+        const tLat = toLat   || OFFICE_COORDS[0];
+        const tLng = toLng   || OFFICE_COORDS[1];
+        const url = `https://router.project-osrm.org/route/v1/driving/${fLng},${fLat};${tLng},${tLat}?overview=full&geometries=geojson`;
+        const res  = await fetch(url, { signal: AbortSignal.timeout(8000) });
+        const json = await res.json();
+        if (!json.routes?.length) throw new Error('No OSRM route');
+        const pts  = json.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+        const color = TRAIL_COLORS[vehicleId] || '#F59E0B';
+        if (roadRouteLayers[vehicleId]) map.removeLayer(roadRouteLayers[vehicleId]);
+        roadRouteLayers[vehicleId] = L.polyline(pts, {
+            color, weight: 4, opacity: 0.45, dashArray: '10, 6', lineJoin: 'round'
+        }).addTo(map);
+        map.fitBounds(roadRouteLayers[vehicleId].getBounds(), { padding: [40, 40] });
+        const dist = (json.routes[0].distance / 1000).toFixed(1);
+        toast(`🗺️ ${vehicleReg} road route loaded — ${dist} km`, 'success');
+    } catch(e) {
+        toast('⚠️ Road route: ' + (e.message || 'OSRM unavailable'), 'warn');
     }
 }
 
@@ -1010,20 +1068,30 @@ function updateVehiclesList(data) {
         return;
     }
     el.innerHTML = trips.map((t, i) => {
-        const color  = TRAIL_COLORS[t.vehicleId] || '#F59E0B';
-        const spd    = (t.currentSpeed || 0).toFixed(0);
-        const eta    = t.etaMinutes != null ? t.etaMinutes + ' min' : '—';
-        const isDone = t.status === 'COMPLETED';
+        const color   = TRAIL_COLORS[t.vehicleId] || '#F59E0B';
+        const spd     = (t.currentSpeed || 0).toFixed(0);
+        const eta     = t.etaMinutes != null ? t.etaMinutes + ' min' : '--';
+        const isDone  = t.status === 'COMPLETED';
+        const isPend  = t.status === 'PENDING';
+        const statusBadge = isDone
+            ? `<span class="v-chip" style="background:var(--green-light);color:var(--green-dark)">✓ Done</span>`
+            : isPend
+                ? `<span class="v-chip" style="background:#F0F9FF;color:#0369A1">⏸ Pending</span>`
+                : `<span class="v-chip" style="background:#FEF9EC;color:#D97706">● Live</span>`;
+        const startBtn = isPend
+            ? `<button id="startBtn-${t.id}" onclick="event.stopPropagation(); startTrip(${t.id}, ${t.vehicleId}, '${t.vehicleReg}')" style="margin-top:6px;width:100%;padding:5px 0;background:var(--green);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:0.3px">▶ Start Trip</button>`
+            : '';
         return `<div class="v-card ${i === 0 ? 'sel' : ''}" onclick="openTripCard(${t.id}, this)">
             <div class="v-avatar" style="background:${color}">🚐</div>
             <div class="v-info">
-                <div class="v-reg">${t.vehicleReg || '—'}</div>
+                <div class="v-reg">${t.vehicleReg || '--'}</div>
                 <div class="v-driver">👤 ${t.driverName || 'Unknown'} · <span style="color:var(--text-3)">${t.route || ''}</span></div>
                 <div class="v-chips">
                     <span class="v-chip vc-spd">⚡ ${spd} km/h</span>
                     <span class="v-chip vc-eta">🎯 ETA ${eta}</span>
-                    <span class="v-chip" style="background:${isDone ? 'var(--green-light)' : '#FEF9EC'};color:${isDone ? 'var(--green-dark)' : '#D97706'}">${isDone ? '✓ Done' : '● Live'}</span>
+                    ${statusBadge}
                 </div>
+                ${startBtn}
             </div>
         </div>`;
     }).join('');
@@ -1285,19 +1353,18 @@ async function resetTrip() {
         const res = await fetch('/api/dashboard/reset', { method: 'POST' });
         const data = await res.json();
         if (data.success) {
-            // Clear all vehicle markers and trails
+            // Clear all vehicle markers, trails and road route overlays
             Object.values(vehicleMarkers).forEach(m => map.removeLayer(m));
             Object.values(vehicleTrails).forEach(l => map.removeLayer(l));
-            vehicleMarkers = {}; vehicleTrails = {}; trailPoints = {};
-            if (roadRouteLayer) { map.removeLayer(roadRouteLayer); roadRouteLayer = null; }
-            roadRouteWaypoints = [];
+            Object.values(roadRouteLayers).forEach(l => map.removeLayer(l));
+            vehicleMarkers = {}; vehicleTrails = {}; trailPoints = {}; roadRouteLayers = {};
             previousEventCount = 0; notifHistory = []; simPingCount = 0;
             document.getElementById('simPings').textContent = '0';
             updateSpeedUI(0);
             document.getElementById('mapVehiclePill').style.display = 'none';
             await refreshDashboard();
-            setSimulating(false, '✅ All trips reset — auto-sim will restart');
-            toast('🔄 All 3 trips reset — vehicles returning to pickup points', 'warn');
+            setSimulating(false, '✅ All trips reset — click Start Trip on each vehicle to begin');
+            toast('🔄 All 3 trips reset — click Start Trip to begin simulation', 'warn');
         } else throw new Error(data.message);
     } catch (e) { setSimulating(false, '❌ ' + e.message); toast('Error: ' + e.message, 'error'); }
 }
@@ -1310,9 +1377,9 @@ connectWebSocket();
 refreshDashboard();
 // Poll every 2 s for status, events, KPIs, pickup updates
 pollInterval = setInterval(() => { if (!isSimulating) refreshDashboard(); }, 2000);
-// Initial sim status message
+// Initial status message
 setTimeout(() => {
-    document.getElementById('simStatus').textContent = '🤖 Auto-simulation running — 3 vehicles moving automatically';
+    document.getElementById('simStatus').textContent = '⏸ Ready — click "Start Trip" on any vehicle to begin road simulation';
 }, 1500);
 </script>
 </body>

@@ -65,11 +65,10 @@ public class DataLoader implements CommandLineRunner {
         driverRepository.save(driver);
         log.info("Driver created: {}, Phone: {}", driver.getName(), driver.getPhoneNumber());
 
-        // Create Trip with status IN_PROGRESS
+        // Create Trip with status PENDING (trips must be started manually)
         Trip trip = Trip.builder()
                 .vehicle(vehicle)
-                .status("IN_PROGRESS")
-                .startTime(LocalDateTime.now().minusHours(1)) // Started 1 hour ago
+                .status("PENDING")
                 .build();
         tripRepository.save(trip);
         log.info("Trip created: ID={}, Status={}", trip.getId(), trip.getStatus());
@@ -105,8 +104,7 @@ public class DataLoader implements CommandLineRunner {
 
         Trip trip2 = Trip.builder()
                 .vehicle(vehicle2)
-                .status("IN_PROGRESS")
-                .startTime(LocalDateTime.now().minusMinutes(20))
+                .status("PENDING")
                 .build();
         tripRepository.save(trip2);
 
@@ -139,8 +137,7 @@ public class DataLoader implements CommandLineRunner {
 
         Trip trip3 = Trip.builder()
                 .vehicle(vehicle3)
-                .status("IN_PROGRESS")
-                .startTime(LocalDateTime.now().minusMinutes(35))
+                .status("PENDING")
                 .build();
         tripRepository.save(trip3);
 
