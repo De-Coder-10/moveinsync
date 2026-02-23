@@ -1,241 +1,746 @@
- <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vehicle Tracking Dashboard</title>
+    <title>MoveInSync — Operations Dashboard</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <!-- SockJS + STOMP for WebSocket real-time streaming (Functionality #1) -->
     <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --green:        #00A651;
+            --green-dark:   #007A3D;
+            --green-darker: #005C2E;
+            --green-light:  #E8F5EE;
+            --green-mid:    #B8DFC8;
+            --green-accent: #00C85A;
+            --bg:           #F0F6F2;
+            --white:        #FFFFFF;
+            --card:         #FFFFFF;
+            --text:         #1C2E1C;
+            --text-2:       #4A6050;
+            --text-3:       #7A9080;
+            --border:       #D4E8DC;
+            --shadow:       0 2px 12px rgba(0,100,50,0.07);
+            --shadow-md:    0 4px 20px rgba(0,100,50,0.12);
+            --shadow-lg:    0 8px 32px rgba(0,100,50,0.16);
+            --radius:       12px;
+            --radius-sm:    8px;
+            --warn:         #F59E0B;
+            --danger:       #EF4444;
+            --info:         #3B82F6;
+        }
+
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f1f5f9; height: 100vh; overflow: hidden; }
-        .app { display: flex; flex-direction: column; height: 100vh; }
 
-        /* Header */
-        .header { display: flex; justify-content: space-between; align-items: center; padding: 12px 24px; background: #1e293b; border-bottom: 1px solid #334155; flex-shrink: 0; z-index: 1000; }
-        .header h1 { font-size: 18px; font-weight: 600; }
-        .header h1 span { color: #3b82f6; }
-        .header-controls { display: flex; align-items: center; gap: 20px; font-size: 13px; }
-        .conn-badge { display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
-        .conn-ws { background: rgba(34,197,94,0.15); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
-        .conn-poll { background: rgba(245,158,11,0.15); color: #f59e0b; border: 1px solid rgba(245,158,11,0.3); }
-        .conn-disc { background: rgba(239,68,68,0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
-        .pulse { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: pulse 1.5s infinite; }
-        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            height: 100vh;
+            overflow: hidden;
+        }
 
-        /* Layout */
-        .main { display: flex; flex: 1; overflow: hidden; }
-        .sidebar { width: 310px; min-width: 310px; background: #1e293b; border-right: 1px solid #334155; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
-        .sidebar::-webkit-scrollbar { width: 5px; }
-        .sidebar::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+        /* ===== HEADER ===== */
+        .header {
+            background: linear-gradient(135deg, var(--green-darker) 0%, var(--green-dark) 55%, var(--green) 100%);
+            height: 62px;
+            padding: 0 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 3px 20px rgba(0,100,50,0.35);
+            position: relative;
+            z-index: 1000;
+            flex-shrink: 0;
+        }
+        .header-left  { display: flex; align-items: center; gap: 16px; }
+        .header-right { display: flex; align-items: center; gap: 14px; }
 
-        /* Cards */
-        .card { background: #334155; border-radius: 10px; padding: 14px; border: 1px solid #475569; }
-        .card-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.2px; color: #94a3b8; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
-        .card-row { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; font-size: 12px; border-bottom: 1px solid rgba(255,255,255,0.04); }
-        .card-row:last-child { border-bottom: none; }
-        .card-row .lbl { color: #94a3b8; }
-        .card-row .val { font-weight: 600; color: #f1f5f9; text-align: right; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .mis-logo { display: flex; align-items: center; gap: 10px; }
+        .mis-logo-icon {
+            width: 38px; height: 38px;
+            background: rgba(255,255,255,0.15);
+            border: 1.5px solid rgba(255,255,255,0.25);
+            border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 20px;
+        }
+        .mis-brand   { font-size: 17px; font-weight: 800; color: #fff; letter-spacing: -0.3px; line-height: 1.1; }
+        .mis-sub     { font-size: 10px; font-weight: 400; color: rgba(255,255,255,0.65); letter-spacing: 0.8px; text-transform: uppercase; }
+
+        .hdr-divider { width: 1px; height: 28px; background: rgba(255,255,255,0.2); }
+        .hdr-page    { font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.85); }
+
+        .live-clock  { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.8); font-variant-numeric: tabular-nums; }
+
+        .conn-badge {
+            display: flex; align-items: center; gap: 6px;
+            padding: 5px 13px; border-radius: 20px;
+            font-size: 11px; font-weight: 700; letter-spacing: 0.3px;
+        }
+        .conn-ws   { background: rgba(255,255,255,0.15); color: #AFFFCC; border: 1px solid rgba(255,255,255,0.2); }
+        .conn-poll { background: rgba(245,158,11,0.2);   color: #FCD34D; border: 1px solid rgba(245,158,11,0.3); }
+        .conn-disc { background: rgba(239,68,68,0.2);    color: #FCA5A5; border: 1px solid rgba(239,68,68,0.3); }
+
+        .pulse { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: pulse 1.5s infinite; flex-shrink: 0; }
+        @keyframes pulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:0.4; transform:scale(0.8); } }
+
+        /* ===== APP BODY ===== */
+        .app-body { height: calc(100vh - 62px); display: flex; flex-direction: column; }
+
+        /* ===== KPI STRIP ===== */
+        .kpi-strip {
+            display: grid; grid-template-columns: repeat(4,1fr);
+            gap: 10px; padding: 10px 18px;
+            background: var(--white);
+            border-bottom: 2px solid var(--border);
+            box-shadow: 0 2px 10px rgba(0,100,50,0.06);
+            flex-shrink: 0;
+        }
+        .kpi-card {
+            display: flex; align-items: center; gap: 12px;
+            padding: 11px 14px;
+            background: var(--white);
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            transition: transform .2s, box-shadow .2s;
+            cursor: default;
+        }
+        .kpi-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+        .kpi-icon {
+            width: 44px; height: 44px; border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 20px; flex-shrink: 0;
+        }
+        .kpi-icon.green  { background: var(--green-light); }
+        .kpi-icon.amber  { background: #FEF9EC; }
+        .kpi-icon.blue   { background: #EFF6FF; }
+        .kpi-icon.red    { background: #FEF2F2; }
+        .kpi-val  { font-size: 26px; font-weight: 800; line-height: 1; }
+        .kpi-val.green { color: var(--green-dark); }
+        .kpi-val.amber { color: #D97706; }
+        .kpi-val.blue  { color: #1D4ED8; }
+        .kpi-val.red   { color: #DC2626; }
+        .kpi-lbl  { font-size: 10px; font-weight: 500; color: var(--text-3); margin-top: 3px; text-transform: uppercase; letter-spacing: 0.4px; }
+        .kpi-pill {
+            font-size: 10px; font-weight: 700; padding: 3px 9px; border-radius: 12px;
+            white-space: nowrap; flex-shrink: 0; margin-left: auto;
+        }
+        .pill-green { background: var(--green-light); color: var(--green-dark); }
+        .pill-amber { background: #FEF9EC; color: #B45309; }
+        .pill-grey  { background: #F3F4F6; color: #6B7280; }
+        .pill-red   { background: #FEF2F2; color: #DC2626; }
+
+        /* ===== MAIN ===== */
+        .main-content { display: flex; flex: 1; overflow: hidden; }
+
+        /* ===== MAP ===== */
+        .map-wrapper { flex: 1; position: relative; overflow: hidden; }
+        #map { width: 100%; height: 100%; }
+
+        .map-top-bar {
+            position: absolute; top: 12px; left: 12px; right: 12px;
+            z-index: 999; display: flex; gap: 8px; pointer-events: none;
+        }
+        .map-pill {
+            background: var(--white); border: 1.5px solid var(--border);
+            border-radius: 20px; padding: 5px 14px; font-size: 11px; font-weight: 600;
+            color: var(--text); display: flex; align-items: center; gap: 6px;
+            box-shadow: var(--shadow); pointer-events: auto;
+        }
+        .map-pill .dot { width: 8px; height: 8px; border-radius: 50%; }
+
+        .map-legend {
+            position: absolute; bottom: 30px; left: 12px;
+            background: var(--white); border: 1.5px solid var(--border);
+            border-radius: var(--radius); padding: 12px 16px;
+            z-index: 999; font-size: 11px; box-shadow: var(--shadow-md); min-width: 160px;
+        }
+        .map-legend h4 { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.2px; color: var(--text-3); margin-bottom: 8px; }
+        .leg-item { display: flex; align-items: center; gap: 8px; padding: 3px 0; color: var(--text-2); font-size: 11px; }
+        .leg-dot  { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+        .leg-line { width: 18px; height: 3px; border-radius: 2px; flex-shrink: 0; }
+
+        /* ===== RIGHT PANEL ===== */
+        .right-panel {
+            width: 345px; min-width: 345px;
+            background: var(--bg);
+            border-left: 2px solid var(--border);
+            display: flex; flex-direction: column; overflow: hidden;
+        }
+        .cmd-header {
+            background: var(--white); border-bottom: 1.5px solid var(--border);
+            padding: 10px 16px; flex-shrink: 0;
+            display: flex; align-items: center; gap: 10px;
+        }
+        .cmd-title { font-size: 13px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; }
+        .live-dot  { width: 9px; height: 9px; border-radius: 50%; background: var(--green); animation: pulse 1.5s infinite; }
+
+        /* Tabs */
+        .tabs { display: flex; background: var(--white); border-bottom: 2px solid var(--border); flex-shrink: 0; }
+        .tab {
+            flex: 1; padding: 10px 4px; font-size: 11px; font-weight: 600;
+            color: var(--text-3); text-align: center; cursor: pointer;
+            border-bottom: 2.5px solid transparent; margin-bottom: -2px;
+            transition: color .2s, border-color .2s;
+            text-transform: uppercase; letter-spacing: 0.4px;
+        }
+        .tab.active  { color: var(--green-dark); border-bottom-color: var(--green); }
+        .tab:hover:not(.active) { color: var(--green); }
+
+        .panel-body {
+            flex: 1; overflow-y: auto; padding: 12px;
+            display: flex; flex-direction: column; gap: 10px;
+        }
+        .panel-body::-webkit-scrollbar { width: 5px; }
+        .panel-body::-webkit-scrollbar-thumb { background: var(--green-mid); border-radius: 3px; }
+
+        /* ===== CARDS ===== */
+        .card { background: var(--card); border: 1.5px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+        .card-hdr {
+            padding: 10px 14px; background: var(--green-light);
+            border-bottom: 1.5px solid var(--green-mid);
+            display: flex; align-items: center; gap: 8px;
+        }
+        .card-hdr-icon  { font-size: 14px; }
+        .card-hdr-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: var(--green-dark); flex: 1; }
+        .card-hdr-badge { font-size: 10px; font-weight: 700; padding: 2px 9px; background: var(--green); color: #fff; border-radius: 12px; }
+        .card-body { padding: 12px 14px; }
+
+        /* Info rows */
+        .row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid rgba(0,166,81,0.07); font-size: 12px; }
+        .row:last-child { border-bottom: none; }
+        .row .lbl { color: var(--text-3); font-weight: 500; }
+        .row .val { font-weight: 600; color: var(--text); text-align: right; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
         /* Badges */
-        .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 20px; font-size: 10px; font-weight: 700; text-transform: uppercase; }
-        .b-progress { background: rgba(245,158,11,.15); color: #f59e0b; border: 1px solid rgba(245,158,11,.3); }
-        .b-completed { background: rgba(34,197,94,.15); color: #22c55e; border: 1px solid rgba(34,197,94,.3); }
-        .b-pending { background: rgba(245,158,11,.15); color: #f59e0b; border: 1px solid rgba(245,158,11,.3); }
-        .b-arrived { background: rgba(59,130,246,.15); color: #3b82f6; border: 1px solid rgba(59,130,246,.3); }
+        .badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 20px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; }
+        .b-live      { background: var(--green-light); color: var(--green-dark); border: 1px solid var(--green-mid); }
+        .b-done      { background: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; }
+        .b-pending   { background: #F3F4F6; color: #6B7280; border: 1px solid #E5E7EB; }
+        .b-arrived   { background: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; }
+        .b-progress  { background: #FEF9EC; color: #D97706; border: 1px solid #FCD34D; }
+        .b-completed { background: var(--green-light); color: var(--green-dark); border: 1px solid var(--green-mid); }
+        .b-alert     { background: #FEF2F2; color: #DC2626; border: 1px solid #FECACA; }
 
-        /* Stats grid */
-        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
-        .stat-box { background: #1e293b; border-radius: 8px; padding: 9px; text-align: center; }
-        .stat-val { font-size: 18px; font-weight: 700; color: #f1f5f9; }
-        .stat-lbl { font-size: 9px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+        /* Stats Grid */
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .stat-box {
+            background: var(--green-light); border-radius: var(--radius-sm);
+            padding: 10px 12px; text-align: center; border: 1.5px solid var(--green-mid);
+        }
         .stat-box.full { grid-column: span 2; }
+        .stat-box.hi   { background: var(--green); border-color: var(--green-dark); }
+        .stat-val  { font-size: 20px; font-weight: 800; color: var(--green-dark); }
+        .stat-lbl  { font-size: 9px; color: var(--text-3); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+        .stat-box.hi .stat-val { color: #fff; }
+        .stat-box.hi .stat-lbl { color: rgba(255,255,255,0.75); }
+
+        /* Filter chips */
+        .filter-row { display: flex; gap: 6px; flex-wrap: wrap; }
+        .chip {
+            padding: 4px 12px; border-radius: 20px; font-size: 10px; font-weight: 700;
+            cursor: pointer; border: 1.5px solid var(--border); background: var(--white);
+            color: var(--text-2); transition: all .2s; text-transform: uppercase; letter-spacing: 0.3px;
+        }
+        .chip.active { background: var(--green); color: #fff; border-color: var(--green-dark); }
+        .chip:hover:not(.active) { background: var(--green-light); border-color: var(--green-mid); color: var(--green-dark); }
+
+        .flt-select {
+            flex: 1; padding: 6px 10px; border: 1.5px solid var(--border);
+            border-radius: var(--radius-sm); background: var(--white);
+            font-size: 11px; color: var(--text); font-family: inherit;
+            font-weight: 500; outline: none; cursor: pointer;
+            transition: border-color .2s;
+        }
+        .flt-select:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(0,166,81,0.1); }
+
+        /* Vehicle cards */
+        .v-card {
+            background: var(--white); border: 1.5px solid var(--border);
+            border-radius: var(--radius); padding: 12px;
+            display: flex; align-items: center; gap: 12px;
+            cursor: pointer; transition: all .2s; box-shadow: var(--shadow);
+        }
+        .v-card:hover   { border-color: var(--green-mid); box-shadow: var(--shadow-md); transform: translateY(-1px); }
+        .v-card.sel     { border-color: var(--green); background: var(--green-light); }
+        .v-avatar       { width: 42px; height: 42px; border-radius: 10px; background: var(--green); display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
+        .v-info         { flex: 1; min-width: 0; }
+        .v-reg          { font-size: 13px; font-weight: 700; color: var(--text); }
+        .v-driver       { font-size: 11px; color: var(--text-2); margin-top: 2px; }
+        .v-chips        { display: flex; gap: 5px; margin-top: 5px; }
+        .v-chip         { font-size: 10px; padding: 2px 7px; border-radius: 10px; font-weight: 700; }
+        .vc-spd         { background: #EFF6FF; color: #1D4ED8; }
+        .vc-eta         { background: var(--green-light); color: var(--green-dark); }
+
+        /* Event / Notification feed */
+        .ev-list { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+        .ev-item {
+            display: flex; align-items: flex-start; gap: 10px;
+            padding: 10px 12px; background: var(--white);
+            border-radius: var(--radius-sm); border: 1.5px solid var(--border);
+            font-size: 11px; transition: all .2s; animation: slideIn .3s ease;
+        }
+        .ev-item:hover { border-color: var(--green-mid); box-shadow: var(--shadow); }
+        .ev-item.pickup   { border-left: 3px solid #3B82F6; }
+        .ev-item.office   { border-left: 3px solid var(--green); }
+        .ev-item.complete { border-left: 3px solid var(--green-dark); }
+        .ev-item.notif    { border-left: 3px solid var(--warn); }
+        .ev-item.alert    { border-left: 3px solid var(--danger); }
+        .ev-icon-w {
+            width: 30px; height: 30px; border-radius: 7px;
+            display: flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0;
+        }
+        .ic-green { background: var(--green-light); }
+        .ic-blue  { background: #EFF6FF; }
+        .ic-amber { background: #FEF9EC; }
+        .ic-red   { background: #FEF2F2; }
+        .ev-title { font-weight: 700; color: var(--text); }
+        .ev-sub   { color: var(--text-3); font-size: 10px; margin-top: 2px; }
+        .empty-msg { text-align: center; color: var(--text-3); font-size: 12px; padding: 22px; font-style: italic; }
+
+        @keyframes slideIn { from { opacity:0; transform:translateX(10px); } to { opacity:1; transform:translateX(0); } }
+
+        /* Section header */
+        .sec-hdr {
+            font-size: 10px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 1px; color: var(--text-3);
+            padding: 2px 0; display: flex; align-items: center; gap: 8px;
+        }
+        .sec-hdr::after { content:''; flex:1; height:1px; background:var(--border); }
 
         /* Sim buttons */
-        .sim-buttons { display: flex; flex-direction: column; gap: 7px; }
-        .sim-btn { display: flex; align-items: center; gap: 9px; padding: 9px 12px; border: 1px solid #475569; border-radius: 8px; background: #1e293b; color: #f1f5f9; font-size: 12px; font-weight: 500; cursor: pointer; transition: all .2s; }
-        .sim-btn:hover:not(:disabled) { background: #475569; transform: translateY(-1px); }
-        .sim-btn:disabled { opacity: .4; cursor: not-allowed; }
-        .sim-btn.btn-pickup { border-left: 3px solid #3b82f6; }
-        .sim-btn.btn-route  { border-left: 3px solid #a855f7; }
-        .sim-btn.btn-drive  { border-left: 3px solid #f59e0b; }
-        .sim-btn.btn-office { border-left: 3px solid #22c55e; }
-        .sim-btn.btn-reset  { border-left: 3px solid #ef4444; }
-        .sim-status { text-align: center; padding: 7px; font-size: 11px; color: #94a3b8; min-height: 28px; }
-        .sim-status.active { color: #f59e0b; }
+        .sim-btns { display: flex; flex-direction: column; gap: 6px; }
+        .sim-btn {
+            display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+            border: 1.5px solid var(--border); border-radius: var(--radius-sm);
+            background: var(--white); color: var(--text); font-size: 12px;
+            font-weight: 600; cursor: pointer; transition: all .2s; font-family: inherit; text-align: left;
+        }
+        .sim-btn:hover:not(:disabled) { border-color: var(--green-mid); background: var(--green-light); color: var(--green-dark); transform: translateY(-1px); box-shadow: var(--shadow); }
+        .sim-btn:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+        .sim-ico { width: 28px; height: 28px; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+        .btn-route  .sim-ico { background: #F3E8FF; }
+        .btn-pickup .sim-ico { background: #EFF6FF; }
+        .btn-drive  .sim-ico { background: #FEF9EC; }
+        .btn-office .sim-ico { background: var(--green-light); }
+        .btn-reset  .sim-ico { background: #FEF2F2; }
 
-        /* Event / Notification list */
-        .item-list { list-style: none; display: flex; flex-direction: column; gap: 6px; max-height: 160px; overflow-y: auto; }
-        .item-list::-webkit-scrollbar { width: 4px; }
-        .item-list::-webkit-scrollbar-thumb { background: #475569; border-radius: 2px; }
-        .ev-item { display: flex; align-items: flex-start; gap: 8px; padding: 7px 9px; background: #1e293b; border-radius: 7px; font-size: 11px; border-left: 3px solid #475569; animation: slideIn .3s ease; }
-        .ev-item.pickup   { border-left-color: #3b82f6; }
-        .ev-item.office   { border-left-color: #a855f7; }
-        .ev-item.complete { border-left-color: #22c55e; }
-        .ev-item.notif    { border-left-color: #f59e0b; }
-        .ev-icon { font-size: 15px; flex-shrink: 0; margin-top: 1px; }
-        .ev-title { font-weight: 700; color: #f1f5f9; }
-        .ev-sub   { color: #64748b; font-size: 10px; margin-top: 1px; }
-        .list-empty { text-align: center; color: #64748b; font-size: 12px; padding: 16px 0; }
-        @keyframes slideIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: translateX(0); } }
+        .sim-bar {
+            padding: 8px 12px; border-radius: var(--radius-sm); font-size: 11px; font-weight: 600;
+            text-align: center; background: var(--green-light); color: var(--green-dark);
+            border: 1.5px solid var(--green-mid); min-height: 34px;
+            display: flex; align-items: center; justify-content: center; transition: all .3s;
+        }
+        .sim-bar.running { background: #FEF9EC; color: #D97706; border-color: #FCD34D; animation: shimmer 1.5s infinite; }
+        @keyframes shimmer { 0%,100%{opacity:1} 50%{opacity:.65} }
 
-        /* Map */
-        .map-container { flex: 1; position: relative; }
-        #map { width: 100%; height: 100%; }
-        .map-legend { position: absolute; bottom: 30px; right: 10px; background: rgba(30,41,59,.92); backdrop-filter: blur(8px); border: 1px solid #475569; border-radius: 10px; padding: 10px 14px; z-index: 999; font-size: 11px; }
-        .map-legend h4 { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #94a3b8; margin-bottom: 7px; }
-        .leg-item { display: flex; align-items: center; gap: 7px; padding: 2px 0; color: #cbd5e1; }
-        .leg-dot  { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; }
-        .leg-line { width: 16px; height: 3px; border-radius: 2px; flex-shrink: 0; }
+        /* Speed gauge */
+        .spd-num  { font-size: 36px; font-weight: 800; color: var(--green-dark); line-height: 1; }
+        .spd-unit { font-size: 11px; color: var(--text-3); font-weight: 500; }
+        .spd-bar-wrap { flex: 1; height: 7px; background: var(--green-light); border-radius: 4px; overflow: hidden; }
+        .spd-bar { height: 100%; background: linear-gradient(90deg, var(--green), var(--green-accent)); border-radius: 4px; transition: width .5s ease; }
+
+        /* Driver avatar */
+        .drv-avatar { width: 50px; height: 50px; border-radius: 50%; background: linear-gradient(135deg, var(--green-dark), var(--green)); display: flex; align-items: center; justify-content: center; font-size: 24px; flex-shrink: 0; border: 2.5px solid var(--green-mid); }
 
         /* Toasts */
-        .toast-wrap { position: fixed; top: 65px; right: 18px; z-index: 9999; display: flex; flex-direction: column; gap: 7px; }
-        .toast { padding: 10px 18px; border-radius: 8px; font-size: 12px; font-weight: 500; color: white; box-shadow: 0 8px 24px rgba(0,0,0,.3); animation: tIn .3s ease, tOut .3s ease 3.7s forwards; display: flex; align-items: center; gap: 8px; }
-        .t-success { background: #16a34a; } .t-info { background: #2563eb; } .t-warn { background: #d97706; } .t-error { background: #dc2626; }
-        @keyframes tIn  { from { opacity:0; transform: translateX(30px); } to { opacity:1; transform: translateX(0); } }
-        @keyframes tOut { from { opacity:1; } to { opacity:0; transform: translateY(-8px); } }
+        .toast-wrap { position: fixed; top: 72px; right: 18px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; max-width: 320px; }
+        .toast {
+            padding: 11px 18px; border-radius: var(--radius-sm); font-size: 12px; font-weight: 600;
+            color: white; box-shadow: var(--shadow-lg); display: flex; align-items: center; gap: 8px;
+            animation: tIn .3s ease, tOut .35s ease 3.65s forwards; border-left: 4px solid rgba(255,255,255,0.3);
+        }
+        .t-success { background: var(--green-dark); }
+        .t-info    { background: #2563EB; }
+        .t-warn    { background: #D97706; }
+        .t-error   { background: #DC2626; }
+        @keyframes tIn  { from{opacity:0;transform:translateX(30px)} to{opacity:1;transform:translateX(0)} }
+        @keyframes tOut { from{opacity:1} to{opacity:0;transform:translateY(-10px)} }
 
-        /* Leaflet custom */
-        .vehicle-marker { font-size: 28px; filter: drop-shadow(0 2px 4px rgba(0,0,0,.5)); }
-        .emoji-lbl { background: none!important; border: none!important; font-size: 20px; }
-        .leaflet-popup-content-wrapper { background: #1e293b; color: #f1f5f9; border: 1px solid #475569; border-radius: 8px; }
-        .leaflet-popup-tip { background: #1e293b; }
-        .leaflet-popup-content { font-size: 12px; }
+        /* Leaflet overrides */
+        .vehicle-marker { font-size: 28px; filter: drop-shadow(0 3px 8px rgba(0,100,50,0.5)); }
+        .emoji-lbl { background: none !important; border: none !important; font-size: 22px; }
+        .leaflet-popup-content-wrapper { background: var(--white); color: var(--text); border: 1.5px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-md); }
+        .leaflet-popup-tip { background: var(--white); }
+        .leaflet-popup-content { font-size: 12px; font-family: 'Inter', sans-serif; line-height: 1.6; }
+        .popup-title { font-weight: 700; font-size: 13px; color: var(--green-dark); margin-bottom: 6px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+        .popup-row { display: flex; justify-content: space-between; gap: 14px; font-size: 11px; padding: 2px 0; }
+        .popup-row .pl { color: var(--text-3); }
+        .popup-row .pv { font-weight: 700; color: var(--text); }
+
+        /* Scrollbar */
+        * { scrollbar-width: thin; scrollbar-color: var(--green-mid) transparent; }
     </style>
 </head>
 <body>
-<div class="app">
 
-    <!-- Header -->
-    <header class="header">
-        <h1>🚐 <span>Vehicle Tracking</span> — Real-Time Dashboard</h1>
-        <div class="header-controls">
-            <span id="connBadge" class="conn-badge conn-disc"><span class="pulse"></span> Connecting…</span>
+<!-- ═══════════════════════════════════ HEADER ═══════════════════════════════════ -->
+<header class="header">
+    <div class="header-left">
+        <div class="mis-logo">
+            <div class="mis-logo-icon">🚐</div>
+            <div>
+                <div class="mis-brand">MoveInSync</div>
+                <div class="mis-sub">Operations Centre</div>
+            </div>
         </div>
-    </header>
+        <div class="hdr-divider"></div>
+        <span class="hdr-page">Real-Time Tracking Dashboard</span>
+    </div>
+    <div class="header-right">
+        <span class="live-clock" id="liveClock">--:--:-- IST</span>
+        <span id="connBadge" class="conn-badge conn-disc"><span class="pulse"></span> Connecting…</span>
+    </div>
+</header>
 
-    <div class="main">
-        <!-- Sidebar -->
-        <aside class="sidebar">
+<div class="app-body">
 
-            <!-- Trip Info -->
-            <div class="card">
-                <div class="card-title">🗺️ Trip Information</div>
-                <div class="card-row"><span class="lbl">Trip ID</span><span class="val" id="tripId">—</span></div>
-                <div class="card-row"><span class="lbl">Status</span><span id="tripStatus"><span class="badge b-progress">Loading</span></span></div>
-                <div class="card-row"><span class="lbl">Vehicle</span><span class="val" id="vehicleReg">—</span></div>
-                <div class="card-row"><span class="lbl">Started</span><span class="val" id="tripStart">—</span></div>
-                <div class="card-row"><span class="lbl">Ended</span><span class="val" id="tripEnd">—</span></div>
-                <div class="card-row"><span class="lbl">Distance</span><span class="val" id="tripDist">—</span></div>
-                <div class="card-row"><span class="lbl">Duration</span><span class="val" id="tripDur">—</span></div>
+    <!-- ═══════════════ KPI STRIP ═══════════════ -->
+    <div class="kpi-strip">
+        <div class="kpi-card">
+            <div class="kpi-icon green">🚐</div>
+            <div style="flex:1">
+                <div class="kpi-val green" id="kpiOngoing">0</div>
+                <div class="kpi-lbl">Ongoing Trips</div>
             </div>
-
-            <!-- Driver Details (Functionality #6) -->
-            <div class="card">
-                <div class="card-title">👤 Driver Details</div>
-                <div class="card-row"><span class="lbl">Name</span><span class="val" id="driverName">—</span></div>
-                <div class="card-row"><span class="lbl">Phone</span><span class="val" id="driverPhone">—</span></div>
-                <div class="card-row"><span class="lbl">License</span><span class="val" id="driverLic">—</span></div>
+            <span class="kpi-pill pill-green" id="kpiOngoingPill">Idle</span>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-icon amber">⚠️</div>
+            <div style="flex:1">
+                <div class="kpi-val amber" id="kpiDelayed">0</div>
+                <div class="kpi-lbl">Delayed Trips</div>
             </div>
-
-            <!-- Pickup Status -->
-            <div class="card">
-                <div class="card-title">📍 Pickup Point</div>
-                <div class="card-row"><span class="lbl">Status</span><span id="pickupStatus"><span class="badge b-pending">Pending</span></span></div>
-                <div class="card-row"><span class="lbl">Location</span><span class="val" id="pickupCoords">—</span></div>
-                <div class="card-row"><span class="lbl">Radius</span><span class="val" id="pickupRadius">—</span></div>
+            <span class="kpi-pill pill-grey" id="kpiDelayedPill">SLA</span>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-icon blue">🏢</div>
+            <div style="flex:1">
+                <div class="kpi-val blue" id="kpiInGeo">0</div>
+                <div class="kpi-lbl">In Office Geofence</div>
             </div>
-
-            <!-- Live Stats -->
-            <div class="card">
-                <div class="card-title">📊 Live Stats</div>
-                <div class="stats-grid">
-                    <div class="stat-box"><div class="stat-val" id="statPings">0</div><div class="stat-lbl">GPS Pings</div></div>
-                    <div class="stat-box"><div class="stat-val" id="statEvents">0</div><div class="stat-lbl">Events</div></div>
-                    <div class="stat-box"><div class="stat-val" id="statSpeed">—</div><div class="stat-lbl">Speed km/h</div></div>
-                    <div class="stat-box"><div class="stat-val" id="statDist">0</div><div class="stat-lbl">Dist km</div></div>
-                    <div class="stat-box full"><div class="stat-val" id="statEta">—</div><div class="stat-lbl">ETA to next stop</div></div>
-                </div>
+            <span class="kpi-pill pill-grey" id="kpiInGeoPill">—</span>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-icon red">📍</div>
+            <div style="flex:1">
+                <div class="kpi-val red" id="kpiNearPU">0</div>
+                <div class="kpi-lbl">Near Pickup</div>
             </div>
-
-            <!-- Simulation Controls -->
-            <div class="card">
-                <div class="card-title">🎮 Simulation Controls</div>
-                <div class="sim-buttons">
-                    <button class="sim-btn btn-route"  onclick="loadRoadRoute()"><span>🗺️</span> Load Road Route</button>
-                    <button class="sim-btn btn-pickup" onclick="simulatePickup()"><span>📍</span> Arrive at Pickup</button>
-                    <button class="sim-btn btn-drive"  onclick="simulateDrive()"><span>🚗</span> Drive to Office</button>
-                    <button class="sim-btn btn-office" onclick="simulateOffice()"><span>🏢</span> Arrive at Office</button>
-                    <button class="sim-btn btn-reset"  onclick="resetTrip()"><span>🔄</span> Reset Trip</button>
-                </div>
-                <div class="sim-status" id="simStatus">Ready to simulate</div>
-            </div>
-
-            <!-- Notification Feed (Functionality #5 — simulated push/SMS) -->
-            <div class="card">
-                <div class="card-title">🔔 Notification Feed <span style="color:#f59e0b;font-size:9px;margin-left:auto">simulated</span></div>
-                <ul class="item-list" id="notifList">
-                    <li class="list-empty">Notifications will appear here…</li>
-                </ul>
-            </div>
-
-            <!-- Event Log (Functionality #7 + #8) -->
-            <div class="card">
-                <div class="card-title">📋 Event Log</div>
-                <ul class="item-list" id="eventList">
-                    <li class="list-empty">No events yet. Run a simulation!</li>
-                </ul>
-            </div>
-
-        </aside>
-
-        <!-- Map -->
-        <div class="map-container">
-            <div id="map"></div>
-            <div class="map-legend">
-                <h4>Legend</h4>
-                <div class="leg-item"><span class="leg-dot" style="background:rgba(59,130,246,.4);border:2px solid #3b82f6"></span> Pickup (50m)</div>
-                <div class="leg-item"><span class="leg-dot" style="background:rgba(34,197,94,.4);border:2px solid #22c55e"></span> Office (100m)</div>
-                <div class="leg-item"><span class="leg-line" style="background:#a855f7;height:3px;border-top:2px dashed #a855f7;background:none"></span> Road Route</div>
-                <div class="leg-item"><span class="leg-line" style="background:#f59e0b"></span> Route Trail</div>
-                <div class="leg-item"><span style="font-size:15px">🚐</span> Vehicle (WebSocket)</div>
-            </div>
+            <span class="kpi-pill pill-grey" id="kpiNearPUPill">—</span>
         </div>
     </div>
-</div>
+
+    <!-- ═══════════════ MAIN ═══════════════ -->
+    <div class="main-content">
+
+        <!-- MAP -->
+        <div class="map-wrapper">
+            <div class="map-top-bar">
+                <div class="map-pill"><span class="dot" style="background:var(--green);width:8px;height:8px;border-radius:50%;animation:pulse 1.5s infinite"></span> Live Tracking</div>
+                <div class="map-pill" id="mapVehiclePill" style="display:none">🚐 <span id="mapVehicleInfo">—</span></div>
+            </div>
+            <div id="map"></div>
+            <div class="map-legend">
+                <h4>Map Legend</h4>
+                <div class="leg-item"><span class="leg-dot" style="background:rgba(59,130,246,.25);border:2px solid #3B82F6"></span>Pickup Zone</div>
+                <div class="leg-item"><span class="leg-dot" style="background:rgba(0,166,81,.25);border:2px solid var(--green)"></span>Office Zone</div>
+                <div class="leg-item"><span class="leg-line" style="border-top:2px dashed #A855F7"></span>Road Route</div>
+                <div class="leg-item"><span class="leg-line" style="background:#F59E0B"></span>Route Trail</div>
+                <div class="leg-item">🚐 Live Vehicle</div>
+            </div>
+        </div>
+
+        <!-- RIGHT PANEL: COMMAND CENTER -->
+        <div class="right-panel">
+
+            <div class="cmd-header">
+                <span class="live-dot"></span>
+                <div class="cmd-title">Command Center Monitoring</div>
+            </div>
+
+            <!-- Tabs -->
+            <div class="tabs">
+                <div class="tab active" onclick="switchTab('monitor',this)">Monitor</div>
+                <div class="tab" onclick="switchTab('trip',this)">Trip</div>
+                <div class="tab" onclick="switchTab('events',this)">Events</div>
+                <div class="tab" onclick="switchTab('sim',this)">Simulate</div>
+            </div>
+
+            <!-- ── TAB: MONITOR ── -->
+            <div class="panel-body" id="tab-monitor">
+
+                <!-- Filters -->
+                <div class="card">
+                    <div class="card-hdr">
+                        <span class="card-hdr-icon">🔍</span>
+                        <span class="card-hdr-title">Filters</span>
+                    </div>
+                    <div class="card-body" style="display:flex;flex-direction:column;gap:8px">
+                        <div style="display:flex;gap:6px">
+                            <select class="flt-select" id="fltRegion" onchange="applyFilters()">
+                                <option value="">🌏 All Regions</option>
+                                <option value="bangalore">Bangalore</option>
+                                <option value="pune">Pune</option>
+                                <option value="mumbai">Mumbai</option>
+                                <option value="hyderabad">Hyderabad</option>
+                            </select>
+                            <select class="flt-select" id="fltOffice" onchange="applyFilters()">
+                                <option value="">🏢 All Offices</option>
+                                <option value="hq">Bangalore HQ</option>
+                                <option value="itpark">IT Park</option>
+                                <option value="techhub">Tech Hub</option>
+                            </select>
+                        </div>
+                        <div style="display:flex;gap:6px">
+                            <select class="flt-select" id="fltRoute" onchange="applyFilters()">
+                                <option value="">🛣️ All Routes</option>
+                                <option value="north">North Route</option>
+                                <option value="south">South Route</option>
+                                <option value="east">East Route</option>
+                            </select>
+                            <select class="flt-select" id="fltTime" onchange="applyFilters()">
+                                <option value="">⏰ All Time</option>
+                                <option value="morning">Morning 6–10</option>
+                                <option value="evening">Evening 4–9</option>
+                                <option value="now">Right Now</option>
+                            </select>
+                        </div>
+                        <div class="filter-row">
+                            <span class="chip active" onclick="setStatusFilter(this,'all')">All</span>
+                            <span class="chip" onclick="setStatusFilter(this,'active')">Active</span>
+                            <span class="chip" onclick="setStatusFilter(this,'delayed')">Delayed</span>
+                            <span class="chip" onclick="setStatusFilter(this,'done')">Done</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Live Stats -->
+                <div class="card">
+                    <div class="card-hdr">
+                        <span class="card-hdr-icon">📊</span>
+                        <span class="card-hdr-title">Live Metrics</span>
+                        <span style="width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 1.5s infinite;margin-left:auto"></span>
+                    </div>
+                    <div class="card-body">
+                        <div class="stats-grid">
+                            <div class="stat-box"><div class="stat-val" id="statPings">0</div><div class="stat-lbl">GPS Pings</div></div>
+                            <div class="stat-box"><div class="stat-val" id="statEvents">0</div><div class="stat-lbl">Events</div></div>
+                            <div class="stat-box hi"><div class="stat-val" id="statSpeed">—</div><div class="stat-lbl">Speed km/h</div></div>
+                            <div class="stat-box"><div class="stat-val" id="statDist">0</div><div class="stat-lbl">Distance km</div></div>
+                            <div class="stat-box full"><div class="stat-val" style="font-size:15px" id="statEta">—</div><div class="stat-lbl">ETA to Next Stop</div></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Active Vehicles -->
+                <div class="sec-hdr">Active Vehicles</div>
+                <div id="vehiclesList"><div class="empty-msg">Loading vehicles…</div></div>
+
+            </div>
+
+            <!-- ── TAB: TRIP ── -->
+            <div class="panel-body" id="tab-trip" style="display:none">
+
+                <div class="card">
+                    <div class="card-hdr">
+                        <span class="card-hdr-icon">🗺️</span>
+                        <span class="card-hdr-title">Trip Information</span>
+                        <span class="card-hdr-badge" id="tripStatusBadge" style="background:var(--warn)">—</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="row"><span class="lbl">Trip ID</span><span class="val" id="tripId">—</span></div>
+                        <div class="row"><span class="lbl">Status</span><span id="tripStatus"><span class="badge b-pending">Loading</span></span></div>
+                        <div class="row"><span class="lbl">Vehicle</span><span class="val" id="vehicleReg">—</span></div>
+                        <div class="row"><span class="lbl">Started</span><span class="val" id="tripStart">—</span></div>
+                        <div class="row"><span class="lbl">Ended</span><span class="val" id="tripEnd">—</span></div>
+                        <div class="row"><span class="lbl">Distance</span><span class="val" id="tripDist">—</span></div>
+                        <div class="row"><span class="lbl">Duration</span><span class="val" id="tripDur">—</span></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-hdr">
+                        <span class="card-hdr-icon">👤</span>
+                        <span class="card-hdr-title">Driver Details</span>
+                    </div>
+                    <div class="card-body">
+                        <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)">
+                            <div class="drv-avatar">👤</div>
+                            <div>
+                                <div style="font-size:14px;font-weight:700;color:var(--text)" id="driverNameLg">—</div>
+                                <div style="font-size:11px;color:var(--text-3);margin-top:3px" id="driverPhoneLg">—</div>
+                                <div style="display:flex;gap:4px;margin-top:5px">
+                                    <span style="font-size:13px;color:#F59E0B">★★★★★</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row"><span class="lbl">License</span><span class="val" id="driverLic">—</span></div>
+                        <div class="row"><span class="lbl">Status</span><span class="val" style="color:var(--green);font-weight:700">● On Duty</span></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-hdr">
+                        <span class="card-hdr-icon">📍</span>
+                        <span class="card-hdr-title">Pickup Point</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="row"><span class="lbl">Status</span><span id="pickupStatus"><span class="badge b-pending">Pending</span></span></div>
+                        <div class="row"><span class="lbl">Coordinates</span><span class="val" id="pickupCoords">—</span></div>
+                        <div class="row"><span class="lbl">Geofence Radius</span><span class="val" id="pickupRadius">—</span></div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- ── TAB: EVENTS ── -->
+            <div class="panel-body" id="tab-events" style="display:none">
+
+                <div class="card">
+                    <div class="card-hdr">
+                        <span class="card-hdr-icon">🔔</span>
+                        <span class="card-hdr-title">Push Notifications</span>
+                        <span style="font-size:9px;color:var(--text-3);font-weight:500;margin-left:auto">Simulated</span>
+                    </div>
+                    <div class="card-body" style="padding:8px 10px">
+                        <ul class="ev-list" id="notifList">
+                            <li class="empty-msg">No notifications yet…</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-hdr">
+                        <span class="card-hdr-icon">📋</span>
+                        <span class="card-hdr-title">Audit Event Log</span>
+                        <span class="card-hdr-badge" id="eventCount">0</span>
+                    </div>
+                    <div class="card-body" style="padding:8px 10px">
+                        <ul class="ev-list" id="eventList">
+                            <li class="empty-msg">No events yet. Run a simulation!</li>
+                        </ul>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- ── TAB: SIMULATE ── -->
+            <div class="panel-body" id="tab-sim" style="display:none">
+
+                <div class="card">
+                    <div class="card-hdr">
+                        <span class="card-hdr-icon">🎮</span>
+                        <span class="card-hdr-title">Simulation Controls</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="sim-btns">
+                            <button class="sim-btn btn-route"  onclick="loadRoadRoute()"><span class="sim-ico">🗺️</span>Load Road Route</button>
+                            <button class="sim-btn btn-pickup" onclick="simulatePickup()"><span class="sim-ico">📍</span>Arrive at Pickup</button>
+                            <button class="sim-btn btn-drive"  onclick="simulateDrive()"><span class="sim-ico">🚗</span>Drive to Office</button>
+                            <button class="sim-btn btn-office" onclick="simulateOffice()"><span class="sim-ico">🏢</span>Arrive at Office</button>
+                            <button class="sim-btn btn-reset"  onclick="resetTrip()"><span class="sim-ico">🔄</span>Reset Trip</button>
+                        </div>
+                        <div class="sim-bar" id="simStatus" style="margin-top:10px">✅ Ready to simulate</div>
+                    </div>
+                </div>
+
+                <!-- Speed Monitor -->
+                <div class="card">
+                    <div class="card-hdr">
+                        <span class="card-hdr-icon">⚡</span>
+                        <span class="card-hdr-title">Live Speed Monitor</span>
+                    </div>
+                    <div class="card-body">
+                        <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px">
+                            <div>
+                                <div class="spd-num" id="speedLarge">0</div>
+                                <div class="spd-unit">km / h</div>
+                            </div>
+                            <div style="flex:1">
+                                <div class="spd-bar-wrap"><div class="spd-bar" id="speedBar" style="width:0%"></div></div>
+                                <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--text-3);margin-top:4px">
+                                    <span>0</span><span>30</span><span>60</span><span>90</span><span>120</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="display:flex;gap:8px">
+                            <div class="stat-box" style="flex:1;padding:8px"><div class="stat-val" style="font-size:16px" id="simDist">0</div><div class="stat-lbl">Distance km</div></div>
+                            <div class="stat-box" style="flex:1;padding:8px"><div class="stat-val" style="font-size:16px" id="simPings">0</div><div class="stat-lbl">Pings Sent</div></div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+        </div><!-- /right-panel -->
+    </div><!-- /main-content -->
+</div><!-- /app-body -->
 
 <div id="toasts" class="toast-wrap"></div>
 
 <script>
-// ===========================
-// State
-// ===========================
+// ═══════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════
 let map, vehicleMarker, routeLine, pickupCircle, officeCircle, pickupMarker, officeMarker;
-let roadRouteLayer = null;      // highlighted road path (OSRM geometry)
-let roadRouteWaypoints = [];    // road-snapped [lat,lng] array for simulation
-let stompClient = null;
-let wsConnected = false;
-let previousEventCount = 0;
-let isSimulating = false;
-let pollInterval;
-let routePoints = [];
+let roadRouteLayer = null, roadRouteWaypoints = [];
+let stompClient = null, wsConnected = false;
+let previousEventCount = 0, isSimulating = false;
+let pollInterval, routePoints = [], simPingCount = 0;
 
-// ===========================
-// Map init
-// ===========================
+// ═══════════════════════════════════════════════════
+// CLOCK
+// ═══════════════════════════════════════════════════
+function updateClock() {
+    document.getElementById('liveClock').textContent =
+        new Date().toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', second:'2-digit', hour12: false }) + ' IST';
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ═══════════════════════════════════════════════════
+// TAB SWITCHING
+// ═══════════════════════════════════════════════════
+function switchTab(id, el) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel-body').forEach(p => p.style.display = 'none');
+    el.classList.add('active');
+    document.getElementById('tab-' + id).style.display = 'flex';
+}
+
+// ═══════════════════════════════════════════════════
+// FILTERS
+// ═══════════════════════════════════════════════════
+function setStatusFilter(el, val) {
+    document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+    el.classList.add('active');
+    toast('🔍 Showing: ' + el.textContent + ' trips', 'info');
+}
+function applyFilters() {
+    toast('🔍 Filters updated', 'info');
+}
+
+// ═══════════════════════════════════════════════════
+// MAP
+// ═══════════════════════════════════════════════════
 function initMap() {
     map = L.map('map', { zoomControl: true }).setView([12.9618, 77.5848], 14);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a>', maxZoom: 19
+        attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a> contributors',
+        maxZoom: 19
     }).addTo(map);
 }
 
-// ===========================
-// Toasts
-// ===========================
+// ═══════════════════════════════════════════════════
+// TOASTS
+// ═══════════════════════════════════════════════════
 function toast(msg, type = 'info') {
     const el = document.createElement('div');
     el.className = 'toast t-' + type;
@@ -244,472 +749,406 @@ function toast(msg, type = 'info') {
     setTimeout(() => el.remove && el.remove(), 4000);
 }
 
-// ===========================
-// WebSocket — Functionality #1
-// Real-time location streaming via STOMP over SockJS
-// ===========================
+// ═══════════════════════════════════════════════════
+// WEBSOCKET
+// ═══════════════════════════════════════════════════
 function connectWebSocket() {
     try {
         const socket = new SockJS('/ws');
         stompClient = Stomp.over(socket);
-        stompClient.debug = null; // suppress console noise
-
-        stompClient.connect({}, function(frame) {
+        stompClient.debug = null;
+        stompClient.connect({}, () => {
             wsConnected = true;
             setConnBadge('ws');
-            toast('🔌 WebSocket connected — live updates active', 'info');
-
-            // Subscribe to real-time location feed
-            stompClient.subscribe('/topic/location-updates', function(msg) {
-                const data = JSON.parse(msg.body);
-                handleWsLocationUpdate(data);
-            });
-        }, function(err) {
+            toast('🔌 WebSocket connected — live GPS stream active', 'info');
+            stompClient.subscribe('/topic/location-updates', msg => handleWsUpdate(JSON.parse(msg.body)));
+        }, () => {
             wsConnected = false;
             setConnBadge('poll');
-            // Auto-reconnect after 5s
             setTimeout(connectWebSocket, 5000);
         });
-    } catch (e) {
-        setConnBadge('disc');
-    }
+    } catch (e) { setConnBadge('disc'); }
 }
 
 function setConnBadge(state) {
     const el = document.getElementById('connBadge');
-    if (state === 'ws') {
-        el.className = 'conn-badge conn-ws';
-        el.innerHTML = '<span class="pulse"></span> WebSocket Live';
-    } else if (state === 'poll') {
-        el.className = 'conn-badge conn-poll';
-        el.innerHTML = '<span class="pulse"></span> Polling fallback';
-    } else {
-        el.className = 'conn-badge conn-disc';
-        el.innerHTML = '<span class="pulse"></span> Disconnected';
-    }
+    if (state === 'ws')   { el.className = 'conn-badge conn-ws';   el.innerHTML = '<span class="pulse"></span> WebSocket Live'; }
+    else if (state === 'poll') { el.className = 'conn-badge conn-poll'; el.innerHTML = '<span class="pulse"></span> Polling Active'; }
+    else                  { el.className = 'conn-badge conn-disc';  el.innerHTML = '<span class="pulse"></span> Disconnected'; }
 }
 
-// ===========================
-// Handle live WebSocket ping
-// Updates map position + speed + distance instantly (no polling needed)
-// ===========================
-function handleWsLocationUpdate(upd) {
+// ═══════════════════════════════════════════════════
+// LIVE WS UPDATE
+// ═══════════════════════════════════════════════════
+function handleWsUpdate(upd) {
     const latLng = [upd.latitude, upd.longitude];
-
-    // Move vehicle marker
     if (!vehicleMarker) {
         vehicleMarker = L.marker(latLng, {
             icon: L.divIcon({ html: '<div class="vehicle-marker">🚐</div>', className: '', iconSize: [36,36], iconAnchor: [18,18] }),
             zIndexOffset: 1000
-        }).addTo(map);
+        }).addTo(map).bindPopup(buildPopup(upd));
     }
-    vehicleMarker.setLatLng(latLng);
-    vehicleMarker.setPopupContent(
-        '<b>Vehicle</b><br>Speed: ' + upd.speed.toFixed(1) + ' km/h' +
-        '<br>Lat: ' + upd.latitude.toFixed(5) + '<br>Lon: ' + upd.longitude.toFixed(5) +
-        '<br>Status: ' + upd.tripStatus
-    );
+    vehicleMarker.setLatLng(latLng).setPopupContent(buildPopup(upd));
 
-    // Extend route trail
+    // Map overlay pill
+    const pill = document.getElementById('mapVehiclePill');
+    pill.style.display = 'flex';
+    document.getElementById('mapVehicleInfo').textContent =
+        (document.getElementById('vehicleReg').textContent !== '—' ? document.getElementById('vehicleReg').textContent : 'Vehicle') +
+        ' · ' + upd.speed.toFixed(0) + ' km/h';
+
+    // Trail
     routePoints.push(latLng);
-    if (routeLine) { routeLine.setLatLngs(routePoints); }
-    else {
-        routeLine = L.polyline(routePoints, { color: '#f59e0b', weight: 3.5, opacity: 0.85, lineJoin: 'round' }).addTo(map);
-    }
+    if (routeLine) routeLine.setLatLngs(routePoints);
+    else routeLine = L.polyline(routePoints, { color: '#F59E0B', weight: 3.5, opacity: 0.85 }).addTo(map);
 
-    // Update live stats immediately
+    // Speed
+    updateSpeedUI(upd.speed);
     document.getElementById('statSpeed').textContent = upd.speed.toFixed(0);
-    document.getElementById('statDist').textContent = (upd.totalDistanceKm || 0).toFixed(2);
+    document.getElementById('statDist').textContent  = (upd.totalDistanceKm || 0).toFixed(2);
+    document.getElementById('simDist').textContent   = (upd.totalDistanceKm || 0).toFixed(2);
 }
 
-// ===========================
-// Polling (every 4s) — fallback for other data
-// trip status, events, pickup status, driver info, ETA
-// ===========================
+function buildPopup(upd) {
+    return `<div class="popup-title">🚐 ${upd.vehicleReg || 'Vehicle'}</div>
+        <div class="popup-row"><span class="pl">Speed</span><span class="pv">${upd.speed.toFixed(1)} km/h</span></div>
+        <div class="popup-row"><span class="pl">Latitude</span><span class="pv">${upd.latitude.toFixed(5)}</span></div>
+        <div class="popup-row"><span class="pl">Longitude</span><span class="pv">${upd.longitude.toFixed(5)}</span></div>
+        <div class="popup-row"><span class="pl">Trip Status</span><span class="pv">${upd.tripStatus || '—'}</span></div>`;
+}
+
+function updateSpeedUI(speed) {
+    document.getElementById('speedLarge').textContent = speed.toFixed(0);
+    document.getElementById('speedBar').style.width = Math.min((speed / 120) * 100, 100) + '%';
+}
+
+// ═══════════════════════════════════════════════════
+// POLLING
+// ═══════════════════════════════════════════════════
 async function refreshDashboard() {
     try {
         const res = await fetch('/api/dashboard/data');
         if (!res.ok) throw new Error();
         const data = await res.json();
-
         if (!wsConnected) setConnBadge('poll');
-
+        updateKPIs(data);
         updateTripInfo(data);
         updateDriverInfo(data);
         updatePickupInfo(data);
         updateStats(data);
-        updateMapStaticElements(data);
+        updateMapStatics(data);
         updateEvents(data);
         updateNotifications(data);
-    } catch (e) {
-        if (!wsConnected) setConnBadge('disc');
-    }
+        updateVehiclesList(data);
+    } catch (e) { if (!wsConnected) setConnBadge('disc'); }
 }
 
-// ===========================
-// Sidebar updaters
-// ===========================
-function fmt(iso) {
-    if (!iso) return '—';
-    return new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+// ═══════════════════════════════════════════════════
+// KPI
+// ═══════════════════════════════════════════════════
+function updateKPIs(data) {
+    const trips = data.trips || [];
+    const ongoing = trips.filter(t => t.status === 'IN_PROGRESS').length;
+    const completed = trips.filter(t => t.status === 'COMPLETED').length;
+    document.getElementById('kpiOngoing').textContent = ongoing;
+    document.getElementById('kpiDelayed').textContent = 0;
+    document.getElementById('kpiInGeo').textContent   = completed;
+    document.getElementById('kpiNearPU').textContent  = (data.pickupPoints || []).filter(p => p.status !== 'ARRIVED').length;
+    const op = document.getElementById('kpiOngoingPill');
+    op.textContent = ongoing > 0 ? 'Active' : 'Idle';
+    op.className   = 'kpi-pill ' + (ongoing > 0 ? 'pill-green' : 'pill-grey');
 }
+
+// ═══════════════════════════════════════════════════
+// VEHICLE LIST
+// ═══════════════════════════════════════════════════
+function updateVehiclesList(data) {
+    const el = document.getElementById('vehiclesList');
+    if (!data.trips || !data.trips.length) { el.innerHTML = '<div class="empty-msg">No active vehicles</div>'; return; }
+    el.innerHTML = data.trips.map((t, i) => `
+        <div class="v-card ${i === 0 ? 'sel' : ''}" onclick="openTrip(${t.id}, this)">
+            <div class="v-avatar">🚐</div>
+            <div class="v-info">
+                <div class="v-reg">${t.vehicleReg || '—'}</div>
+                <div class="v-driver">👤 ${t.driverName || 'Unknown Driver'}</div>
+                <div class="v-chips">
+                    <span class="v-chip vc-spd">⚡ ${t.currentSpeed != null ? t.currentSpeed.toFixed(0) : '—'} km/h</span>
+                    <span class="v-chip vc-eta">🎯 ETA ${t.etaMinutes != null ? t.etaMinutes + ' min' : '—'}</span>
+                </div>
+            </div>
+            <div>${t.status === 'COMPLETED' ? '<span class="badge b-done">Done</span>' : '<span class="badge b-live">● Live</span>'}</div>
+        </div>`).join('');
+}
+function openTrip(id, el) {
+    document.querySelectorAll('.v-card').forEach(c => c.classList.remove('sel'));
+    el.classList.add('sel');
+    // switch to trip tab
+    document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', i===1));
+    document.querySelectorAll('.panel-body').forEach(p => p.style.display = 'none');
+    document.getElementById('tab-trip').style.display = 'flex';
+}
+
+// ═══════════════════════════════════════════════════
+// DATA UPDATERS
+// ═══════════════════════════════════════════════════
+const fmt = iso => iso ? new Date(iso).toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', second:'2-digit' }) : '—';
 
 function updateTripInfo(data) {
     if (!data.trips.length) return;
     const t = data.trips[0];
-    document.getElementById('tripId').textContent = '#' + t.id;
-    document.getElementById('vehicleReg').textContent = t.vehicleReg;
-    document.getElementById('tripStart').textContent = fmt(t.startTime);
-    document.getElementById('tripEnd').textContent = t.endTime ? fmt(t.endTime) : '—';
-    document.getElementById('tripDist').textContent = t.totalDistanceKm ? t.totalDistanceKm.toFixed(2) + ' km' : '0.00 km';
-    document.getElementById('tripDur').textContent = t.durationMinutes ? t.durationMinutes + ' min' : '—';
-    const st = document.getElementById('tripStatus');
-    st.innerHTML = t.status === 'COMPLETED'
-        ? '<span class="badge b-completed">✓ Completed</span>'
-        : '<span class="badge b-progress">● In Progress</span>';
+    document.getElementById('tripId').textContent      = '#' + t.id;
+    document.getElementById('vehicleReg').textContent  = t.vehicleReg;
+    document.getElementById('tripStart').textContent   = fmt(t.startTime);
+    document.getElementById('tripEnd').textContent     = t.endTime ? fmt(t.endTime) : '—';
+    document.getElementById('tripDist').textContent    = t.totalDistanceKm ? t.totalDistanceKm.toFixed(2) + ' km' : '0.00 km';
+    document.getElementById('tripDur').textContent     = t.durationMinutes ? t.durationMinutes + ' min' : '—';
+    const done = t.status === 'COMPLETED';
+    document.getElementById('tripStatus').innerHTML =
+        done ? '<span class="badge b-completed">✓ Completed</span>' : '<span class="badge b-progress">● In Progress</span>';
+    const badge = document.getElementById('tripStatusBadge');
+    badge.textContent = done ? 'Done' : 'Live';
+    badge.style.background = done ? 'var(--green-dark)' : 'var(--warn)';
 }
-
 function updateDriverInfo(data) {
     if (!data.trips.length) return;
     const t = data.trips[0];
-    document.getElementById('driverName').textContent  = t.driverName  || '—';
-    document.getElementById('driverPhone').textContent = t.driverPhone || '—';
-    document.getElementById('driverLic').textContent   = t.driverLicense || '—';
+    document.getElementById('driverNameLg').textContent  = t.driverName  || '—';
+    document.getElementById('driverPhoneLg').textContent = t.driverPhone || '—';
+    document.getElementById('driverLic').textContent     = t.driverLicense || '—';
 }
-
 function updatePickupInfo(data) {
     if (!data.pickupPoints.length) return;
     const pp = data.pickupPoints[0];
     document.getElementById('pickupCoords').textContent = pp.latitude.toFixed(4) + ', ' + pp.longitude.toFixed(4);
-    document.getElementById('pickupRadius').textContent = pp.radiusMeters + 'm';
-    const st = document.getElementById('pickupStatus');
-    st.innerHTML = pp.status === 'ARRIVED'
-        ? '<span class="badge b-arrived">✓ Arrived</span>'
-        : '<span class="badge b-pending">● Pending</span>';
+    document.getElementById('pickupRadius').textContent = pp.radiusMeters + ' m';
+    document.getElementById('pickupStatus').innerHTML   =
+        pp.status === 'ARRIVED' ? '<span class="badge b-arrived">✓ Arrived</span>' : '<span class="badge b-pending">● Pending</span>';
 }
-
 function updateStats(data) {
     document.getElementById('statPings').textContent  = data.locationLogs.length;
     document.getElementById('statEvents').textContent = data.events.length;
+    document.getElementById('eventCount').textContent = data.events.length;
     if (!wsConnected && data.locationLogs.length > 0) {
         const ll = data.locationLogs[data.locationLogs.length - 1];
+        updateSpeedUI(ll.speed);
         document.getElementById('statSpeed').textContent = ll.speed.toFixed(0);
         document.getElementById('statDist').textContent  = (data.trips[0]?.totalDistanceKm || 0).toFixed(2);
+        document.getElementById('simDist').textContent   = (data.trips[0]?.totalDistanceKm || 0).toFixed(2);
     }
-    // ETA (Functionality #6)
     if (data.trips.length > 0) {
         const t = data.trips[0];
-        if (t.etaMinutes !== null && t.etaMinutes !== undefined && t.status === 'IN_PROGRESS') {
-            document.getElementById('statEta').textContent = t.etaMinutes + ' min → ' + (t.etaDestination || '');
-        } else if (t.status === 'COMPLETED') {
-            document.getElementById('statEta').textContent = 'Arrived ✓';
-        } else {
-            document.getElementById('statEta').textContent = '—';
-        }
+        document.getElementById('statEta').textContent =
+            (t.etaMinutes != null && t.status === 'IN_PROGRESS') ? t.etaMinutes + ' min → ' + (t.etaDestination || 'Office') :
+            t.status === 'COMPLETED' ? '✓ Arrived' : '—';
     }
 }
 
-// ===========================
-// Map static elements (geofences, markers) — drawn once
-// ===========================
-function updateMapStaticElements(data) {
+// ═══════════════════════════════════════════════════
+// MAP STATICS
+// ═══════════════════════════════════════════════════
+function updateMapStatics(data) {
     if (data.pickupPoints.length > 0 && !pickupCircle) {
         const pp = data.pickupPoints[0];
-        pickupCircle = L.circle([pp.latitude, pp.longitude], {
-            radius: pp.radiusMeters, color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.12, weight: 2, dashArray: '6,4'
-        }).addTo(map);
+        pickupCircle = L.circle([pp.latitude, pp.longitude],
+            { radius: pp.radiusMeters, color: '#3B82F6', fillColor: '#3B82F6', fillOpacity: 0.1, weight: 2, dashArray: '6,4' }).addTo(map);
         pickupMarker = L.marker([pp.latitude, pp.longitude], {
-            icon: L.divIcon({ html: '<div style="font-size:20px">📍</div>', className: 'emoji-lbl', iconSize: [28,28], iconAnchor: [14,14] })
-        }).addTo(map).bindPopup('<b>Pickup Point</b><br>Radius: ' + pp.radiusMeters + 'm');
+            icon: L.divIcon({ html: '<div style="font-size:22px">📍</div>', className: 'emoji-lbl', iconSize: [28,28], iconAnchor: [14,14] })
+        }).addTo(map).bindPopup('<b style="color:#1D4ED8">Pickup Point</b><br><small>Radius: ' + pp.radiusMeters + 'm</small>');
     }
     if (data.officeGeofences.length > 0 && !officeCircle) {
         const of = data.officeGeofences[0];
-        officeCircle = L.circle([of.latitude, of.longitude], {
-            radius: of.radiusMeters, color: '#22c55e', fillColor: '#22c55e', fillOpacity: 0.12, weight: 2, dashArray: '6,4'
-        }).addTo(map);
+        officeCircle = L.circle([of.latitude, of.longitude],
+            { radius: of.radiusMeters, color: '#00A651', fillColor: '#00A651', fillOpacity: 0.1, weight: 2, dashArray: '6,4' }).addTo(map);
         officeMarker = L.marker([of.latitude, of.longitude], {
-            icon: L.divIcon({ html: '<div style="font-size:20px">🏢</div>', className: 'emoji-lbl', iconSize: [28,28], iconAnchor: [14,14] })
-        }).addTo(map).bindPopup('<b>Office</b><br>Radius: ' + of.radiusMeters + 'm');
+            icon: L.divIcon({ html: '<div style="font-size:22px">🏢</div>', className: 'emoji-lbl', iconSize: [28,28], iconAnchor: [14,14] })
+        }).addTo(map).bindPopup('<b style="color:var(--green-dark)">Office — ' + (of.name || 'HQ') + '</b><br><small>Radius: ' + of.radiusMeters + 'm</small>');
     }
-    // Rebuild route from DB (useful after page reload or fallback to polling)
     if (!wsConnected && data.locationLogs.length > 0) {
         const pts = data.locationLogs.map(l => [l.latitude, l.longitude]);
         routePoints = pts;
         if (routeLine) routeLine.setLatLngs(pts);
-        else routeLine = L.polyline(pts, { color: '#f59e0b', weight: 3.5, opacity: 0.85 }).addTo(map);
+        else routeLine = L.polyline(pts, { color: '#F59E0B', weight: 3.5, opacity: 0.85 }).addTo(map);
         const ll = data.locationLogs[data.locationLogs.length - 1];
-        if (!vehicleMarker) {
-            vehicleMarker = L.marker([ll.latitude, ll.longitude], {
-                icon: L.divIcon({ html: '<div class="vehicle-marker">🚐</div>', className: '', iconSize: [36,36], iconAnchor: [18,18] }),
-                zIndexOffset: 1000
-            }).addTo(map);
-        }
+        if (!vehicleMarker) vehicleMarker = L.marker([ll.latitude, ll.longitude], {
+            icon: L.divIcon({ html: '<div class="vehicle-marker">🚐</div>', className: '', iconSize: [36,36], iconAnchor: [18,18] }),
+            zIndexOffset: 1000
+        }).addTo(map);
         vehicleMarker.setLatLng([ll.latitude, ll.longitude]);
     }
 }
 
-// ===========================
-// Events (Functionality #7 + #8)
-// ===========================
-const EVENT_META = {
-    PICKUP_ARRIVED: { icon: '📍', cls: 'pickup',   label: 'Pickup Arrived'  },
-    OFFICE_REACHED: { icon: '🏢', cls: 'office',   label: 'Office Reached'  },
-    TRIP_COMPLETED: { icon: '✅', cls: 'complete',  label: 'Trip Completed'  }
+// ═══════════════════════════════════════════════════
+// EVENTS
+// ═══════════════════════════════════════════════════
+const EV_META = {
+    PICKUP_ARRIVED:   { icon:'📍', cls:'pickup',   icw:'ic-blue',  label:'Pickup Arrived'        },
+    OFFICE_REACHED:   { icon:'🏢', cls:'office',   icw:'ic-green', label:'Office Reached'        },
+    TRIP_COMPLETED:   { icon:'✅', cls:'complete',  icw:'ic-green', label:'Trip Completed'        },
+    MANUAL_CLOSURE:   { icon:'🔒', cls:'complete',  icw:'ic-amber', label:'Manual Closure'        },
+    ADMIN_ALERT:      { icon:'🚨', cls:'alert',     icw:'ic-red',   label:'Admin Alert'           },
+    GEOFENCE_EXIT:    { icon:'📤', cls:'alert',     icw:'ic-red',   label:'Geofence Exit'         },
+    TRIP_CLOSURE_BLOCKED_MIN_DURATION: { icon:'⏱️', cls:'notif', icw:'ic-amber', label:'Min Duration Block' }
 };
-
 function updateEvents(data) {
     const list = document.getElementById('eventList');
-    if (!data.events.length) {
-        list.innerHTML = '<li class="list-empty">No events yet. Run a simulation!</li>';
-        return;
-    }
+    if (!data.events.length) { list.innerHTML = '<li class="empty-msg">No events yet.</li>'; return; }
     list.innerHTML = data.events.map(e => {
-        const m = EVENT_META[e.eventType] || { icon: '⚡', cls: '', label: e.eventType };
+        const m = EV_META[e.eventType] || { icon:'⚡', cls:'', icw:'ic-green', label: e.eventType };
         return `<li class="ev-item ${m.cls}">
-            <span class="ev-icon">${m.icon}</span>
+            <div class="ev-icon-w ${m.icw}">${m.icon}</div>
             <div><div class="ev-title">${m.label}</div><div class="ev-sub">${fmt(e.timestamp)} · Trip #${e.tripId}</div></div>
         </li>`;
     }).join('');
-
-    // Toast for new events
     if (data.events.length > previousEventCount && previousEventCount > 0) {
-        const newOnes = data.events.slice(0, data.events.length - previousEventCount);
-        newOnes.forEach(e => {
-            const m = EVENT_META[e.eventType] || { icon: '⚡' };
-            toast(m.icon + ' ' + (EVENT_META[e.eventType]?.label || e.eventType), 'info');
+        data.events.slice(0, data.events.length - previousEventCount).forEach(e => {
+            const m = EV_META[e.eventType] || { icon:'⚡' };
+            toast(m.icon + ' ' + (EV_META[e.eventType]?.label || e.eventType), 'success');
         });
     }
     previousEventCount = data.events.length;
 }
-
-// ===========================
-// Notification Feed (Functionality #5 — simulated push/SMS)
-// Displayed when PICKUP_ARRIVED or TRIP_COMPLETED fires
-// ===========================
 let notifHistory = [];
 function updateNotifications(data) {
     const list = document.getElementById('notifList');
-    const notifications = data.events.filter(e => e.eventType === 'PICKUP_ARRIVED' || e.eventType === 'TRIP_COMPLETED');
-
-    // Check for new ones and add to history
-    notifications.forEach(e => {
-        const key = e.id + '_' + e.eventType;
-        if (!notifHistory.includes(key)) {
-            notifHistory.push(key);
-        }
-    });
-
-    if (!notifications.length) {
-        list.innerHTML = '<li class="list-empty">Notifications will appear here…</li>';
-        return;
-    }
-
-    list.innerHTML = notifications.map(e => {
-        const isPickup = e.eventType === 'PICKUP_ARRIVED';
+    const notifs = data.events.filter(e => e.eventType === 'PICKUP_ARRIVED' || e.eventType === 'TRIP_COMPLETED');
+    if (!notifs.length) { list.innerHTML = '<li class="empty-msg">No notifications yet…</li>'; return; }
+    list.innerHTML = notifs.map(e => {
+        const isP = e.eventType === 'PICKUP_ARRIVED';
         return `<li class="ev-item notif">
-            <span class="ev-icon">📱</span>
+            <div class="ev-icon-w ic-amber">📱</div>
             <div>
-                <div class="ev-title">${isPickup ? 'Push: Cab has arrived!' : 'Push: Trip completed!'}</div>
-                <div class="ev-sub">${isPickup ? '📲 SMS fallback sent to employee' : '📲 SMS fallback sent'} · ${fmt(e.timestamp)}</div>
+                <div class="ev-title">${isP ? 'Push: Cab has arrived!' : 'Push: Trip completed!'}</div>
+                <div class="ev-sub">${isP ? '📲 SMS sent to employee' : '📲 SMS confirmation sent'} · ${fmt(e.timestamp)}</div>
             </div>
         </li>`;
     }).join('');
 }
 
-// ===========================
-// Simulation helpers
-// ===========================
+// ═══════════════════════════════════════════════════
+// SIMULATION
+// ═══════════════════════════════════════════════════
 async function sendPing(lat, lng, speed) {
+    simPingCount++;
+    document.getElementById('simPings').textContent = simPingCount;
     const res = await fetch('/api/location/update', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ vehicleId: 1, tripId: 1, latitude: lat, longitude: lng, speed: speed,
-            timestamp: new Date().toISOString().slice(0, 19) })
+        body: JSON.stringify({ vehicleId:1, tripId:1, latitude:lat, longitude:lng, speed,
+            timestamp: new Date().toISOString().slice(0,19) })
     });
     if (!res.ok) { const e = await res.json(); throw new Error(e.message || 'API error'); }
 }
-
-function setSimulating(active, msg) {
-    isSimulating = active;
-    document.getElementById('simStatus').textContent = msg || (active ? 'Simulating…' : 'Ready to simulate');
-    document.getElementById('simStatus').className = 'sim-status' + (active ? ' active' : '');
-    document.querySelectorAll('.sim-btn').forEach(b => b.disabled = active);
+function setSimulating(on, msg) {
+    isSimulating = on;
+    const el = document.getElementById('simStatus');
+    el.textContent = msg || (on ? 'Simulating…' : '✅ Ready to simulate');
+    el.className = 'sim-bar' + (on ? ' running' : '');
+    document.querySelectorAll('.sim-btn').forEach(b => b.disabled = on);
 }
-
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function simulatePickup() {
     try {
-        setSimulating(true, '📍 Sending pickup ping…');
+        setSimulating(true, '📍 Sending pickup arrival ping…');
         await sendPing(12.9520, 77.5750, 2);
         await sleep(600); await refreshDashboard();
-        setSimulating(false, '✓ Pickup ping sent!');
-        toast('📍 Ping sent at pickup location (inside 50m geofence)', 'info');
-    } catch (e) { setSimulating(false, '✗ ' + e.message); toast('Error: ' + e.message, 'error'); }
+        setSimulating(false, '✅ Pickup ping sent!');
+        toast('📍 Arrived at pickup location (within 50m geofence)', 'success');
+    } catch (e) { setSimulating(false, '❌ ' + e.message); toast('Error: ' + e.message, 'error'); }
 }
-
 async function simulateDrive() {
-    // If road route not loaded yet, fetch it first
-    if (roadRouteWaypoints.length === 0) {
-        toast('🗺️ Fetching road route first…', 'info');
-        const ok = await loadRoadRoute(true); // silent=true (don't set simulating state from inside)
-        if (!ok) return;
-    }
-
-    // Build evenly-spaced speed profile across the route
+    if (roadRouteWaypoints.length === 0) { toast('🗺️ Loading road route…', 'info'); const ok = await loadRoadRoute(true); if (!ok) return; }
     const n = roadRouteWaypoints.length;
     const speeds = roadRouteWaypoints.map((_, i) => {
-        const t = i / (n - 1);   // 0→1 along the route
-        // Ramp up 0→0.3, cruise 0.3→0.8, ramp down 0.8→1
-        if (t < 0.3)      return Math.round(5  + t / 0.3 * 35);    // 5→40
-        else if (t < 0.8) return Math.round(38 + Math.sin(t * Math.PI) * 6); // 38-44
-        else              return Math.round(40 - (t - 0.8) / 0.2 * 35);       // 40→5
+        const t = i / (n - 1);
+        if (t < 0.3)      return Math.round(5  + t / 0.3 * 35);
+        else if (t < 0.8) return Math.round(38 + Math.sin(t * Math.PI) * 6);
+        else              return Math.round(40 - (t - 0.8) / 0.2 * 35);
     });
-
     try {
         setSimulating(true, '🚗 Driving along road route…');
         for (let i = 0; i < n; i++) {
-            const [lat, lng] = roadRouteWaypoints[i];
-            const spd = speeds[i];
+            const [lat, lng] = roadRouteWaypoints[i]; const spd = speeds[i];
             setSimulating(true, `🚗 Driving… (${i+1}/${n}) — ${spd} km/h`);
             await sendPing(lat, lng, spd);
-            // Move vehicle marker immediately on map (smooth visual)
+            updateSpeedUI(spd);
             if (vehicleMarker) vehicleMarker.setLatLng([lat, lng]);
             await sleep(400);
-            // Only refresh dashboard every ~3 pings to reduce load
             if (i % 3 === 0 || i === n - 1) await refreshDashboard();
         }
-        setSimulating(false, '✓ Arrived near office!');
-        toast('🚗 Road route simulation complete — near office', 'warn');
-    } catch (e) { setSimulating(false, '✗ ' + e.message); toast('Error: ' + e.message, 'error'); }
+        setSimulating(false, '✅ Arrived near office!');
+        toast('🚗 Road route simulation complete', 'success');
+    } catch (e) { setSimulating(false, '❌ ' + e.message); toast('Error: ' + e.message, 'error'); }
 }
-
-// ===========================
-// OSRM Road Route (Functionality: real road path)
-// Fetches actual road geometry from pickup → office via OSRM
-// Draws a highlighted dashed purple polyline on the map
-// ===========================
 async function loadRoadRoute(silent = false) {
-    // Pickup: 12.9520, 77.5750  →  Office: 12.9716, 77.5946
-    const from = [12.9520, 77.5750];
-    const to   = [12.9716, 77.5946];
-
+    const from = [12.9520, 77.5750], to = [12.9716, 77.5946];
     if (!silent) setSimulating(true, '🗺️ Loading road route from OSRM…');
-
     try {
-        // OSRM public demo API — no key required
-        const url = `https://router.project-osrm.org/route/v1/driving/` +
-                    `${from[1]},${from[0]};${to[1]},${to[0]}` +
-                    `?overview=full&geometries=geojson`;
-
+        const url = `https://router.project-osrm.org/route/v1/driving/${from[1]},${from[0]};${to[1]},${to[0]}?overview=full&geometries=geojson`;
         const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-        if (!res.ok) throw new Error('OSRM API error: ' + res.status);
+        if (!res.ok) throw new Error('OSRM ' + res.status);
         const json = await res.json();
-
-        if (!json.routes || json.routes.length === 0) throw new Error('No route found');
-
-        // GeoJSON coords are [lng, lat] → convert to Leaflet [lat, lng]
-        const coords = json.routes[0].geometry.coordinates;
-        roadRouteWaypoints = coords.map(c => [c[1], c[0]]);
-
-        // Draw / update the road route layer
+        if (!json.routes?.length) throw new Error('No route');
+        roadRouteWaypoints = json.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
         if (roadRouteLayer) map.removeLayer(roadRouteLayer);
-        roadRouteLayer = L.polyline(roadRouteWaypoints, {
-            color: '#a855f7',
-            weight: 5,
-            opacity: 0.75,
-            dashArray: '10, 6',
-            lineJoin: 'round'
-        }).addTo(map);
-
-        // Fit map to show the full route
+        roadRouteLayer = L.polyline(roadRouteWaypoints, { color: '#A855F7', weight: 5, opacity: 0.75, dashArray: '10, 6', lineJoin: 'round' }).addTo(map);
         map.fitBounds(roadRouteLayer.getBounds(), { padding: [40, 40] });
-
-        const distKm = (json.routes[0].distance / 1000).toFixed(2);
-        const durMin = Math.round(json.routes[0].duration / 60);
-
-        if (!silent) {
-            setSimulating(false, `✓ Road route loaded (${distKm} km, ~${durMin} min)`);
-            toast(`🗺️ Road route loaded — ${distKm} km · ${roadRouteWaypoints.length} waypoints`, 'success');
-        }
+        const dist = (json.routes[0].distance / 1000).toFixed(2), dur = Math.round(json.routes[0].duration / 60);
+        if (!silent) { setSimulating(false, `✅ Route loaded (${dist} km, ~${dur} min)`); toast(`🗺️ Road route loaded — ${dist} km · ${roadRouteWaypoints.length} waypoints`, 'success'); }
         return true;
     } catch (e) {
-        if (!silent) setSimulating(false, '✗ OSRM error: ' + e.message);
+        if (!silent) setSimulating(false, '⚠️ OSRM unavailable — using fallback');
         toast('⚠️ OSRM unavailable — using fallback straight path', 'warn');
-
-        // Fallback: straight-line interpolation between key waypoints
-        roadRouteWaypoints = interpolatePath([
-            [12.9520, 77.5750],
-            [12.9580, 77.5810],
-            [12.9640, 77.5875],
-            [12.9716, 77.5946]
-        ], 20);
-
+        roadRouteWaypoints = interpolatePath([[12.9520,77.5750],[12.9580,77.5810],[12.9640,77.5875],[12.9716,77.5946]], 20);
         if (roadRouteLayer) map.removeLayer(roadRouteLayer);
-        roadRouteLayer = L.polyline(roadRouteWaypoints, {
-            color: '#a855f7', weight: 5, opacity: 0.65,
-            dashArray: '8, 5', lineJoin: 'round'
-        }).addTo(map);
-        map.fitBounds(roadRouteLayer.getBounds(), { padding: [40, 40] });
-
-        if (!silent) toast(`🗺️ Fallback path drawn (${roadRouteWaypoints.length} pts)`, 'info');
+        roadRouteLayer = L.polyline(roadRouteWaypoints, { color:'#A855F7', weight:5, opacity:0.65, dashArray:'8, 5', lineJoin:'round' }).addTo(map);
+        map.fitBounds(roadRouteLayer.getBounds(), { padding:[40,40] });
         return true;
     }
 }
-
-// Linear interpolation between path keypoints → n points per segment
-function interpolatePath(keypoints, pointsPerSegment) {
-    const result = [];
-    for (let s = 0; s < keypoints.length - 1; s++) {
-        const [lat1, lng1] = keypoints[s];
-        const [lat2, lng2] = keypoints[s + 1];
-        for (let i = 0; i <= pointsPerSegment; i++) {
-            const t = i / pointsPerSegment;
-            result.push([lat1 + (lat2 - lat1) * t, lng1 + (lng2 - lng1) * t]);
-        }
+function interpolatePath(pts, n) {
+    const r = [];
+    for (let s = 0; s < pts.length - 1; s++) {
+        const [la1,lo1] = pts[s], [la2,lo2] = pts[s+1];
+        for (let i = 0; i <= n; i++) { const t=i/n; r.push([la1+(la2-la1)*t, lo1+(lo2-lo1)*t]); }
     }
-    return result;
+    return r;
 }
-
 async function simulateOffice() {
     try {
         setSimulating(true, '🏢 Arriving at office (speed 2 km/h)…');
         await sendPing(12.9716, 77.5946, 2);
         await sleep(600); await refreshDashboard();
-        setSimulating(false, '✓ Office arrival ping sent!');
-        toast('🏢 At office — speed < 5 km/h → TRIP_COMPLETED!', 'success');
-    } catch (e) { setSimulating(false, '✗ ' + e.message); toast('Error: ' + e.message, 'error'); }
+        setSimulating(false, '✅ Office arrival sent → TRIP_COMPLETED!');
+        toast('🏢 Vehicle inside office geofence — Trip marked COMPLETED!', 'success');
+    } catch (e) { setSimulating(false, '❌ ' + e.message); toast('Error: ' + e.message, 'error'); }
 }
-
 async function resetTrip() {
     try {
-        setSimulating(true, '🔄 Resetting…');
+        setSimulating(true, '🔄 Resetting trip…');
         const res = await fetch('/api/dashboard/reset', { method: 'POST' });
         const data = await res.json();
         if (data.success) {
-            if (vehicleMarker) { map.removeLayer(vehicleMarker); vehicleMarker = null; }
-            if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
-            if (roadRouteLayer) { map.removeLayer(roadRouteLayer); roadRouteLayer = null; }
+            [vehicleMarker, routeLine, roadRouteLayer].forEach(l => { if (l) map.removeLayer(l); });
+            vehicleMarker = routeLine = roadRouteLayer = null;
             routePoints = []; roadRouteWaypoints = [];
-            previousEventCount = 0; notifHistory = [];
+            previousEventCount = 0; notifHistory = []; simPingCount = 0;
+            document.getElementById('simPings').textContent = '0';
+            updateSpeedUI(0);
+            document.getElementById('mapVehiclePill').style.display = 'none';
             await refreshDashboard();
-            setSimulating(false, '✓ Reset! Ready to simulate again.');
-            toast('🔄 Trip has been reset', 'warn');
+            setSimulating(false, '✅ Reset complete! Ready to simulate.');
+            toast('🔄 Trip has been reset successfully', 'warn');
         } else throw new Error(data.message);
-    } catch (e) { setSimulating(false, '✗ ' + e.message); toast('Error: ' + e.message, 'error'); }
+    } catch (e) { setSimulating(false, '❌ ' + e.message); toast('Error: ' + e.message, 'error'); }
 }
 
-// ===========================
-// Boot
-// ===========================
+// ═══════════════════════════════════════════════════
+// BOOT
+// ═══════════════════════════════════════════════════
 initMap();
-connectWebSocket();                                    // WebSocket first
-refreshDashboard();                                    // Initial data load
-pollInterval = setInterval(() => {                     // Polling every 4s for status/events
-    if (!isSimulating) refreshDashboard();
-}, 4000);
+connectWebSocket();
+refreshDashboard();
+pollInterval = setInterval(() => { if (!isSimulating) refreshDashboard(); }, 4000);
 </script>
 </body>
-</html> 
-
-
-
+</html>
