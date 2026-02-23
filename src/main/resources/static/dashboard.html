@@ -687,13 +687,28 @@
 
 <script>
 // ═══════════════════════════════════════════════════
-// STATE
+// STATE — multi-vehicle
 // ═══════════════════════════════════════════════════
-let map, vehicleMarker, routeLine, pickupCircle, officeCircle, pickupMarker, officeMarker;
+let map;
+let vehicleMarkers  = {};   // vehicleId → Leaflet marker
+let vehicleTrails   = {};   // vehicleId → Leaflet polyline
+let trailPoints     = {};   // vehicleId → [[lat,lng],...]
+let pickupCircles   = {};   // pickupId  → Leaflet circle
+let officeCircles   = {};   // officeId  → Leaflet circle
+
 let roadRouteLayer = null, roadRouteWaypoints = [];
 let stompClient = null, wsConnected = false;
 let previousEventCount = 0, isSimulating = false;
-let pollInterval, routePoints = [], simPingCount = 0;
+let pollInterval, simPingCount = 0;
+let allTripsData    = [];   // full trip list from API (for filtering)
+let notifHistory    = [];
+
+// Active filter state
+let fltRegion = '', fltOffice = '', fltRoute = '', fltStatus = 'all', fltTime = '';
+
+// Per-vehicle trail colours (green palette + accents)
+const TRAIL_COLORS  = { 1: '#F59E0B', 2: '#3B82F6', 3: '#EC4899' };
+const VEHICLE_LABEL = { 1: 'North', 2: 'South', 3: 'East' };
 
 // ═══════════════════════════════════════════════════
 // CLOCK
@@ -716,22 +731,53 @@ function switchTab(id, el) {
 }
 
 // ═══════════════════════════════════════════════════
-// FILTERS
+// FILTERS — live client-side filtering
 // ═══════════════════════════════════════════════════
 function setStatusFilter(el, val) {
     document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
     el.classList.add('active');
-    toast('🔍 Showing: ' + el.textContent + ' trips', 'info');
+    fltStatus = val;
+    applyFilters();
 }
 function applyFilters() {
-    toast('🔍 Filters updated', 'info');
+    fltRegion = document.getElementById('fltRegion').value;
+    fltOffice = document.getElementById('fltOffice').value;
+    fltRoute  = document.getElementById('fltRoute').value;
+    fltTime   = document.getElementById('fltTime').value;
+    updateVehiclesList({ trips: allTripsData });
+    syncMapHighlights();
+}
+function getFilteredTrips() {
+    const ROUTE_MAP = { north: 'North Route', south: 'South Route', east: 'East Route' };
+    const OFFICE_MAP = { hq: 'Bangalore HQ', itpark: 'IT Park', techhub: 'Tech Hub' };
+    const REGION_MAP = { bangalore: 'Bangalore', pune: 'Pune', mumbai: 'Mumbai', hyderabad: 'Hyderabad', chennai: 'Chennai' };
+
+    return allTripsData.filter(t => {
+        if (fltStatus === 'active'   && t.status !== 'IN_PROGRESS') return false;
+        if (fltStatus === 'delayed'  && t.status !== 'DELAYED')      return false;
+        if (fltStatus === 'done'     && t.status !== 'COMPLETED')    return false;
+        if (fltRegion  && t.region   !== REGION_MAP[fltRegion])      return false;
+        if (fltRoute   && t.route    !== ROUTE_MAP[fltRoute])        return false;
+        if (fltOffice  && t.officeName !== OFFICE_MAP[fltOffice])    return false;
+        if (fltTime === 'now'     && t.status !== 'IN_PROGRESS')     return false;
+        if (fltTime === 'morning' && t.region !== 'Bangalore')       return false;
+        return true;
+    });
+}
+/** Dim markers for vehicles that are filtered out */
+function syncMapHighlights() {
+    const visible = new Set(getFilteredTrips().map(t => t.vehicleId));
+    Object.entries(vehicleMarkers).forEach(([vid, m]) => {
+        const el = m.getElement();
+        if (el) el.style.opacity = (visible.size === 0 || visible.has(Number(vid))) ? '1' : '0.25';
+    });
 }
 
 // ═══════════════════════════════════════════════════
 // MAP
 // ═══════════════════════════════════════════════════
 function initMap() {
-    map = L.map('map', { zoomControl: true }).setView([12.9618, 77.5848], 14);
+    map = L.map('map', { zoomControl: true }).setView([12.9400, 77.6100], 12);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a> contributors',
         maxZoom: 19
@@ -760,8 +806,16 @@ function connectWebSocket() {
         stompClient.connect({}, () => {
             wsConnected = true;
             setConnBadge('ws');
-            toast('🔌 WebSocket connected — live GPS stream active', 'info');
-            stompClient.subscribe('/topic/location-updates', msg => handleWsUpdate(JSON.parse(msg.body)));
+            toast('🔌 WebSocket connected — 3-vehicle live stream active', 'info');
+
+            // Live GPS pings — update each vehicle's marker + trail instantly
+            stompClient.subscribe('/topic/location-updates', msg =>
+                handleWsUpdate(JSON.parse(msg.body)));
+
+            // Geofence events — pickup arrived, trip completed, trip reset
+            stompClient.subscribe('/topic/geofence-events', msg =>
+                handleGeofenceEvent(JSON.parse(msg.body)));
+
         }, () => {
             wsConnected = false;
             setConnBadge('poll');
@@ -778,52 +832,106 @@ function setConnBadge(state) {
 }
 
 // ═══════════════════════════════════════════════════
-// LIVE WS UPDATE
+// LIVE WS UPDATE — moves correct vehicle marker
 // ═══════════════════════════════════════════════════
 function handleWsUpdate(upd) {
+    const vId   = upd.vehicleId;
     const latLng = [upd.latitude, upd.longitude];
-    if (!vehicleMarker) {
-        vehicleMarker = L.marker(latLng, {
-            icon: L.divIcon({ html: '<div class="vehicle-marker">🚐</div>', className: '', iconSize: [36,36], iconAnchor: [18,18] }),
+    const color  = TRAIL_COLORS[vId] || '#F59E0B';
+
+    // Create or update this vehicle's marker
+    if (!vehicleMarkers[vId]) {
+        vehicleMarkers[vId] = L.marker(latLng, {
+            icon: vehicleIcon(vId, upd.speed),
             zIndexOffset: 1000
         }).addTo(map).bindPopup(buildPopup(upd));
+    } else {
+        vehicleMarkers[vId].setIcon(vehicleIcon(vId, upd.speed));
+        vehicleMarkers[vId].setLatLng(latLng);
+        vehicleMarkers[vId].setPopupContent(buildPopup(upd));
     }
-    vehicleMarker.setLatLng(latLng).setPopupContent(buildPopup(upd));
 
-    // Map overlay pill
-    const pill = document.getElementById('mapVehiclePill');
-    pill.style.display = 'flex';
+    // Extend this vehicle's trail polyline
+    if (!trailPoints[vId])  trailPoints[vId] = [];
+    trailPoints[vId].push(latLng);
+    if (!vehicleTrails[vId]) {
+        vehicleTrails[vId] = L.polyline(trailPoints[vId],
+            { color, weight: 3.5, opacity: 0.8, lineJoin: 'round' }).addTo(map);
+    } else {
+        vehicleTrails[vId].setLatLngs(trailPoints[vId]);
+    }
+
+    // Map info pill — show last updated vehicle
+    document.getElementById('mapVehiclePill').style.display = 'flex';
     document.getElementById('mapVehicleInfo').textContent =
-        (document.getElementById('vehicleReg').textContent !== '—' ? document.getElementById('vehicleReg').textContent : 'Vehicle') +
-        ' · ' + upd.speed.toFixed(0) + ' km/h';
+        `${upd.vehicleReg || 'V' + vId} · ${upd.speed.toFixed(0)} km/h`;
 
-    // Trail
-    routePoints.push(latLng);
-    if (routeLine) routeLine.setLatLngs(routePoints);
-    else routeLine = L.polyline(routePoints, { color: '#F59E0B', weight: 3.5, opacity: 0.85 }).addTo(map);
-
-    // Speed
+    // Update speed display
     updateSpeedUI(upd.speed);
     document.getElementById('statSpeed').textContent = upd.speed.toFixed(0);
-    document.getElementById('statDist').textContent  = (upd.totalDistanceKm || 0).toFixed(2);
-    document.getElementById('simDist').textContent   = (upd.totalDistanceKm || 0).toFixed(2);
+}
+
+function vehicleIcon(vId, speed) {
+    const color = TRAIL_COLORS[vId] || '#F59E0B';
+    const lbl   = VEHICLE_LABEL[vId] || 'V' + vId;
+    return L.divIcon({
+        html: `<div style="position:relative;text-align:center">
+            <div style="font-size:26px;filter:drop-shadow(0 2px 6px rgba(0,0,0,.4))">🚐</div>
+            <div style="background:${color};color:#fff;font-size:9px;font-weight:800;
+                padding:2px 5px;border-radius:8px;margin-top:1px;white-space:nowrap;
+                box-shadow:0 1px 3px rgba(0,0,0,.3)">${lbl} · ${speed.toFixed(0)}</div>
+        </div>`,
+        className: '',
+        iconSize: [44, 44],
+        iconAnchor: [22, 36]
+    });
 }
 
 function buildPopup(upd) {
-    return `<div class="popup-title">🚐 ${upd.vehicleReg || 'Vehicle'}</div>
+    const color = TRAIL_COLORS[upd.vehicleId] || '#F59E0B';
+    return `<div class="popup-title" style="color:${color}">🚐 ${upd.vehicleReg || 'Vehicle ' + upd.vehicleId}</div>
         <div class="popup-row"><span class="pl">Speed</span><span class="pv">${upd.speed.toFixed(1)} km/h</span></div>
         <div class="popup-row"><span class="pl">Latitude</span><span class="pv">${upd.latitude.toFixed(5)}</span></div>
         <div class="popup-row"><span class="pl">Longitude</span><span class="pv">${upd.longitude.toFixed(5)}</span></div>
-        <div class="popup-row"><span class="pl">Trip Status</span><span class="pv">${upd.tripStatus || '—'}</span></div>`;
+        <div class="popup-row"><span class="pl">Trip</span><span class="pv">#${upd.tripId} · ${upd.tripStatus || '—'}</span></div>`;
 }
 
 function updateSpeedUI(speed) {
-    document.getElementById('speedLarge').textContent = speed.toFixed(0);
+    document.getElementById('speedLarge').textContent = Math.round(speed);
     document.getElementById('speedBar').style.width = Math.min((speed / 120) * 100, 100) + '%';
 }
 
 // ═══════════════════════════════════════════════════
-// POLLING
+// GEOFENCE EVENTS — instant dashboard reaction
+// Triggered by backend /topic/geofence-events topic
+// ═══════════════════════════════════════════════════
+function handleGeofenceEvent(ev) {
+    switch (ev.eventType) {
+        case 'PICKUP_ARRIVED':
+            toast(`📍 ${ev.vehicleReg} arrived at pickup point!`, 'info');
+            refreshDashboard();
+            break;
+        case 'TRIP_COMPLETED':
+            toast(`✅ Trip #${ev.tripId} (${ev.vehicleReg}) completed — arriving at office!`, 'success');
+            refreshDashboard();
+            // Auto-switch to Events tab to show the event
+            const evTab = document.querySelectorAll('.tab')[2];
+            if (evTab) switchTab('events', evTab);
+            break;
+        case 'TRIP_RESET':
+            toast(`🔄 ${ev.vehicleReg} restarted — new trip cycle beginning`, 'warn');
+            // Clear old trail for this vehicle
+            const vId = ev.vehicleId;
+            if (vehicleTrails[vId])  { map.removeLayer(vehicleTrails[vId]);  delete vehicleTrails[vId];  }
+            if (vehicleMarkers[vId]) { map.removeLayer(vehicleMarkers[vId]); delete vehicleMarkers[vId]; }
+            if (trailPoints[vId])    { delete trailPoints[vId]; }
+            refreshDashboard();
+            break;
+    }
+}
+
+// ═══════════════════════════════════════════════════
+// POLLING — every 2 s when not simulating
 // ═══════════════════════════════════════════════════
 async function refreshDashboard() {
     try {
@@ -831,93 +939,139 @@ async function refreshDashboard() {
         if (!res.ok) throw new Error();
         const data = await res.json();
         if (!wsConnected) setConnBadge('poll');
+        allTripsData = data.trips || [];
         updateKPIs(data);
-        updateTripInfo(data);
-        updateDriverInfo(data);
-        updatePickupInfo(data);
         updateStats(data);
         updateMapStatics(data);
         updateEvents(data);
         updateNotifications(data);
-        updateVehiclesList(data);
+        updateVehiclesList({ trips: getFilteredTrips() });
+        // Rebuild trails from DB if WS was disconnected
+        if (!wsConnected) rebuildTrailsFromLogs(data.locationLogs || []);
     } catch (e) { if (!wsConnected) setConnBadge('disc'); }
 }
 
+// Rebuild trails from persisted location logs (e.g. after page reload)
+function rebuildTrailsFromLogs(logs) {
+    const byVehicle = {};
+    logs.forEach(l => {
+        if (!byVehicle[l.vehicleId]) byVehicle[l.vehicleId] = [];
+        byVehicle[l.vehicleId].push([l.latitude, l.longitude]);
+    });
+    Object.entries(byVehicle).forEach(([vid, pts]) => {
+        const vId = Number(vid);
+        const color = TRAIL_COLORS[vId] || '#F59E0B';
+        if (pts.length === 0) return;
+        trailPoints[vId] = pts;
+        if (!vehicleTrails[vId]) {
+            vehicleTrails[vId] = L.polyline(pts, { color, weight: 3.5, opacity: 0.8 }).addTo(map);
+        } else {
+            vehicleTrails[vId].setLatLngs(pts);
+        }
+        const last = pts[pts.length - 1];
+        // Find latest log for this vehicle to get speed
+        const latestLog = logs.filter(l => l.vehicleId === vId).slice(-1)[0];
+        const spd = latestLog ? latestLog.speed : 0;
+        if (!vehicleMarkers[vId]) {
+            vehicleMarkers[vId] = L.marker(last, {
+                icon: vehicleIcon(vId, spd), zIndexOffset: 1000
+            }).addTo(map);
+        } else {
+            vehicleMarkers[vId].setLatLng(last).setIcon(vehicleIcon(vId, spd));
+        }
+    });
+}
+
 // ═══════════════════════════════════════════════════
-// KPI
+// KPI STRIP
 // ═══════════════════════════════════════════════════
 function updateKPIs(data) {
-    const trips = data.trips || [];
-    const ongoing = trips.filter(t => t.status === 'IN_PROGRESS').length;
+    const trips     = data.trips || [];
+    const ongoing   = trips.filter(t => t.status === 'IN_PROGRESS').length;
     const completed = trips.filter(t => t.status === 'COMPLETED').length;
+    const pickups   = (data.pickupPoints || []).filter(p => p.status !== 'ARRIVED').length;
     document.getElementById('kpiOngoing').textContent = ongoing;
     document.getElementById('kpiDelayed').textContent = 0;
     document.getElementById('kpiInGeo').textContent   = completed;
-    document.getElementById('kpiNearPU').textContent  = (data.pickupPoints || []).filter(p => p.status !== 'ARRIVED').length;
+    document.getElementById('kpiNearPU').textContent  = pickups;
     const op = document.getElementById('kpiOngoingPill');
-    op.textContent = ongoing > 0 ? 'Active' : 'Idle';
+    op.textContent = ongoing > 0 ? ongoing + ' Active' : 'Idle';
     op.className   = 'kpi-pill ' + (ongoing > 0 ? 'pill-green' : 'pill-grey');
 }
 
 // ═══════════════════════════════════════════════════
-// VEHICLE LIST
+// VEHICLE LIST — uses filtered trips
 // ═══════════════════════════════════════════════════
 function updateVehiclesList(data) {
     const el = document.getElementById('vehiclesList');
-    if (!data.trips || !data.trips.length) { el.innerHTML = '<div class="empty-msg">No active vehicles</div>'; return; }
-    el.innerHTML = data.trips.map((t, i) => `
-        <div class="v-card ${i === 0 ? 'sel' : ''}" onclick="openTrip(${t.id}, this)">
-            <div class="v-avatar">🚐</div>
+    const trips = data.trips || [];
+    if (!trips.length) {
+        el.innerHTML = '<div class="empty-msg">No vehicles match the current filters</div>';
+        return;
+    }
+    el.innerHTML = trips.map((t, i) => {
+        const color  = TRAIL_COLORS[t.vehicleId] || '#F59E0B';
+        const spd    = (t.currentSpeed || 0).toFixed(0);
+        const eta    = t.etaMinutes != null ? t.etaMinutes + ' min' : '—';
+        const isDone = t.status === 'COMPLETED';
+        return `<div class="v-card ${i === 0 ? 'sel' : ''}" onclick="openTripCard(${t.id}, this)">
+            <div class="v-avatar" style="background:${color}">🚐</div>
             <div class="v-info">
                 <div class="v-reg">${t.vehicleReg || '—'}</div>
-                <div class="v-driver">👤 ${t.driverName || 'Unknown Driver'}</div>
+                <div class="v-driver">👤 ${t.driverName || 'Unknown'} · <span style="color:var(--text-3)">${t.route || ''}</span></div>
                 <div class="v-chips">
-                    <span class="v-chip vc-spd">⚡ ${t.currentSpeed != null ? t.currentSpeed.toFixed(0) : '—'} km/h</span>
-                    <span class="v-chip vc-eta">🎯 ETA ${t.etaMinutes != null ? t.etaMinutes + ' min' : '—'}</span>
+                    <span class="v-chip vc-spd">⚡ ${spd} km/h</span>
+                    <span class="v-chip vc-eta">🎯 ETA ${eta}</span>
+                    <span class="v-chip" style="background:${isDone ? 'var(--green-light)' : '#FEF9EC'};color:${isDone ? 'var(--green-dark)' : '#D97706'}">${isDone ? '✓ Done' : '● Live'}</span>
                 </div>
             </div>
-            <div>${t.status === 'COMPLETED' ? '<span class="badge b-done">Done</span>' : '<span class="badge b-live">● Live</span>'}</div>
-        </div>`).join('');
+        </div>`;
+    }).join('');
 }
-function openTrip(id, el) {
+function openTripCard(id, el) {
     document.querySelectorAll('.v-card').forEach(c => c.classList.remove('sel'));
     el.classList.add('sel');
-    // switch to trip tab
-    document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', i===1));
+    const trip = allTripsData.find(t => t.id === id);
+    if (!trip) return;
+    // Populate trip tab
+    document.getElementById('tripId').textContent     = '#' + trip.id;
+    document.getElementById('vehicleReg').textContent = trip.vehicleReg || '—';
+    document.getElementById('tripStart').textContent  = fmt(trip.startTime);
+    document.getElementById('tripEnd').textContent    = trip.endTime ? fmt(trip.endTime) : '—';
+    document.getElementById('tripDist').textContent   = trip.totalDistanceKm ? trip.totalDistanceKm.toFixed(2) + ' km' : '0.00 km';
+    document.getElementById('tripDur').textContent    = trip.durationMinutes ? trip.durationMinutes + ' min' : '—';
+    const done = trip.status === 'COMPLETED';
+    document.getElementById('tripStatus').innerHTML   = done
+        ? '<span class="badge b-completed">✓ Completed</span>'
+        : '<span class="badge b-progress">● In Progress</span>';
+    document.getElementById('tripStatusBadge').textContent = done ? 'Done' : 'Live';
+    document.getElementById('tripStatusBadge').style.background = done ? 'var(--green-dark)' : 'var(--warn)';
+    document.getElementById('driverNameLg').textContent  = trip.driverName  || '—';
+    document.getElementById('driverPhoneLg').textContent = trip.driverPhone || '—';
+    document.getElementById('driverLic').textContent     = trip.driverLicense || '—';
+    // Switch to Trip tab
+    document.querySelectorAll('.tab').forEach((t, i) => t.classList.toggle('active', i === 1));
     document.querySelectorAll('.panel-body').forEach(p => p.style.display = 'none');
     document.getElementById('tab-trip').style.display = 'flex';
+    // Pan map to this vehicle
+    if (vehicleMarkers[trip.vehicleId]) {
+        map.setView(vehicleMarkers[trip.vehicleId].getLatLng(), 15);
+    }
 }
 
 // ═══════════════════════════════════════════════════
 // DATA UPDATERS
 // ═══════════════════════════════════════════════════
-const fmt = iso => iso ? new Date(iso).toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', second:'2-digit' }) : '—';
+const fmt = iso => iso ? new Date(iso).toLocaleTimeString('en-IN',
+    { hour:'2-digit', minute:'2-digit', second:'2-digit' }) : '—';
 
 function updateTripInfo(data) {
+    // Trip tab shows first trip by default; clicking a vehicle card updates it
     if (!data.trips.length) return;
-    const t = data.trips[0];
-    document.getElementById('tripId').textContent      = '#' + t.id;
-    document.getElementById('vehicleReg').textContent  = t.vehicleReg;
-    document.getElementById('tripStart').textContent   = fmt(t.startTime);
-    document.getElementById('tripEnd').textContent     = t.endTime ? fmt(t.endTime) : '—';
-    document.getElementById('tripDist').textContent    = t.totalDistanceKm ? t.totalDistanceKm.toFixed(2) + ' km' : '0.00 km';
-    document.getElementById('tripDur').textContent     = t.durationMinutes ? t.durationMinutes + ' min' : '—';
-    const done = t.status === 'COMPLETED';
-    document.getElementById('tripStatus').innerHTML =
-        done ? '<span class="badge b-completed">✓ Completed</span>' : '<span class="badge b-progress">● In Progress</span>';
-    const badge = document.getElementById('tripStatusBadge');
-    badge.textContent = done ? 'Done' : 'Live';
-    badge.style.background = done ? 'var(--green-dark)' : 'var(--warn)';
-}
-function updateDriverInfo(data) {
-    if (!data.trips.length) return;
-    const t = data.trips[0];
-    document.getElementById('driverNameLg').textContent  = t.driverName  || '—';
-    document.getElementById('driverPhoneLg').textContent = t.driverPhone || '—';
-    document.getElementById('driverLic').textContent     = t.driverLicense || '—';
+    openTripCard(data.trips[0].id, document.querySelector('.v-card') || { classList: { add: ()=>{}, remove: ()=>{} } });
 }
 function updatePickupInfo(data) {
-    if (!data.pickupPoints.length) return;
+    if (!data.pickupPoints || !data.pickupPoints.length) return;
     const pp = data.pickupPoints[0];
     document.getElementById('pickupCoords').textContent = pp.latitude.toFixed(4) + ', ' + pp.longitude.toFixed(4);
     document.getElementById('pickupRadius').textContent = pp.radiusMeters + ' m';
@@ -925,56 +1079,57 @@ function updatePickupInfo(data) {
         pp.status === 'ARRIVED' ? '<span class="badge b-arrived">✓ Arrived</span>' : '<span class="badge b-pending">● Pending</span>';
 }
 function updateStats(data) {
-    document.getElementById('statPings').textContent  = data.locationLogs.length;
-    document.getElementById('statEvents').textContent = data.events.length;
-    document.getElementById('eventCount').textContent = data.events.length;
-    if (!wsConnected && data.locationLogs.length > 0) {
-        const ll = data.locationLogs[data.locationLogs.length - 1];
-        updateSpeedUI(ll.speed);
-        document.getElementById('statSpeed').textContent = ll.speed.toFixed(0);
-        document.getElementById('statDist').textContent  = (data.trips[0]?.totalDistanceKm || 0).toFixed(2);
-        document.getElementById('simDist').textContent   = (data.trips[0]?.totalDistanceKm || 0).toFixed(2);
-    }
-    if (data.trips.length > 0) {
-        const t = data.trips[0];
+    const total = (data.locationLogs || []).length;
+    document.getElementById('statPings').textContent  = total;
+    document.getElementById('statEvents').textContent = (data.events || []).length;
+    document.getElementById('eventCount').textContent = (data.events || []).length;
+    // ETA for first active trip
+    const active = (data.trips || []).find(t => t.status === 'IN_PROGRESS');
+    if (active) {
         document.getElementById('statEta').textContent =
-            (t.etaMinutes != null && t.status === 'IN_PROGRESS') ? t.etaMinutes + ' min → ' + (t.etaDestination || 'Office') :
-            t.status === 'COMPLETED' ? '✓ Arrived' : '—';
+            active.etaMinutes != null ? active.etaMinutes + ' min → ' + (active.etaDestination || 'Office') : '—';
+    } else {
+        document.getElementById('statEta').textContent = 'All trips complete ✓';
     }
+    document.getElementById('simDist').textContent =
+        ((data.trips || []).reduce((s, t) => s + (t.totalDistanceKm || 0), 0)).toFixed(2);
 }
 
 // ═══════════════════════════════════════════════════
-// MAP STATICS
+// MAP STATICS — geofence circles (drawn once per ID)
 // ═══════════════════════════════════════════════════
 function updateMapStatics(data) {
-    if (data.pickupPoints.length > 0 && !pickupCircle) {
-        const pp = data.pickupPoints[0];
-        pickupCircle = L.circle([pp.latitude, pp.longitude],
-            { radius: pp.radiusMeters, color: '#3B82F6', fillColor: '#3B82F6', fillOpacity: 0.1, weight: 2, dashArray: '6,4' }).addTo(map);
-        pickupMarker = L.marker([pp.latitude, pp.longitude], {
-            icon: L.divIcon({ html: '<div style="font-size:22px">📍</div>', className: 'emoji-lbl', iconSize: [28,28], iconAnchor: [14,14] })
-        }).addTo(map).bindPopup('<b style="color:#1D4ED8">Pickup Point</b><br><small>Radius: ' + pp.radiusMeters + 'm</small>');
-    }
-    if (data.officeGeofences.length > 0 && !officeCircle) {
-        const of = data.officeGeofences[0];
-        officeCircle = L.circle([of.latitude, of.longitude],
-            { radius: of.radiusMeters, color: '#00A651', fillColor: '#00A651', fillOpacity: 0.1, weight: 2, dashArray: '6,4' }).addTo(map);
-        officeMarker = L.marker([of.latitude, of.longitude], {
-            icon: L.divIcon({ html: '<div style="font-size:22px">🏢</div>', className: 'emoji-lbl', iconSize: [28,28], iconAnchor: [14,14] })
-        }).addTo(map).bindPopup('<b style="color:var(--green-dark)">Office — ' + (of.name || 'HQ') + '</b><br><small>Radius: ' + of.radiusMeters + 'm</small>');
-    }
-    if (!wsConnected && data.locationLogs.length > 0) {
-        const pts = data.locationLogs.map(l => [l.latitude, l.longitude]);
-        routePoints = pts;
-        if (routeLine) routeLine.setLatLngs(pts);
-        else routeLine = L.polyline(pts, { color: '#F59E0B', weight: 3.5, opacity: 0.85 }).addTo(map);
-        const ll = data.locationLogs[data.locationLogs.length - 1];
-        if (!vehicleMarker) vehicleMarker = L.marker([ll.latitude, ll.longitude], {
-            icon: L.divIcon({ html: '<div class="vehicle-marker">🚐</div>', className: '', iconSize: [36,36], iconAnchor: [18,18] }),
-            zIndexOffset: 1000
+    // Office geofences
+    (data.officeGeofences || []).forEach(of => {
+        if (officeCircles[of.id]) return;
+        officeCircles[of.id] = L.circle([of.latitude, of.longitude], {
+            radius: of.radiusMeters,
+            color: '#00A651', fillColor: '#00A651', fillOpacity: 0.1, weight: 2, dashArray: '6,4'
         }).addTo(map);
-        vehicleMarker.setLatLng([ll.latitude, ll.longitude]);
-    }
+        L.marker([of.latitude, of.longitude], {
+            icon: L.divIcon({ html: '<div style="font-size:22px">🏢</div>', className: 'emoji-lbl', iconSize: [28,28], iconAnchor: [14,14] })
+        }).addTo(map).bindPopup(
+            `<b style="color:var(--green-dark)">🏢 ${of.name || 'Office'}</b><br><small>Radius: ${of.radiusMeters}m</small>`
+        );
+    });
+
+    // Pickup points — each gets its own circle
+    (data.pickupPoints || []).forEach(pp => {
+        if (pickupCircles[pp.id]) {
+            // Update colour if arrived
+            if (pp.status === 'ARRIVED') {
+                pickupCircles[pp.id].setStyle({ color: '#22C55E', fillColor: '#22C55E' });
+            }
+            return;
+        }
+        pickupCircles[pp.id] = L.circle([pp.latitude, pp.longitude], {
+            radius: pp.radiusMeters,
+            color: '#3B82F6', fillColor: '#3B82F6', fillOpacity: 0.1, weight: 2, dashArray: '6,4'
+        }).addTo(map);
+        L.marker([pp.latitude, pp.longitude], {
+            icon: L.divIcon({ html: '<div style="font-size:22px">📍</div>', className: 'emoji-lbl', iconSize: [28,28], iconAnchor: [14,14] })
+        }).addTo(map).bindPopup(`<b style="color:#1D4ED8">📍 Pickup #${pp.id}</b><br><small>Radius: ${pp.radiusMeters}m</small>`);
+    });
 }
 
 // ═══════════════════════════════════════════════════
@@ -991,56 +1146,58 @@ const EV_META = {
 };
 function updateEvents(data) {
     const list = document.getElementById('eventList');
-    if (!data.events.length) { list.innerHTML = '<li class="empty-msg">No events yet.</li>'; return; }
-    list.innerHTML = data.events.map(e => {
+    if (!(data.events || []).length) { list.innerHTML = '<li class="empty-msg">No events yet — auto-sim will fire events automatically</li>'; return; }
+    list.innerHTML = (data.events || []).map(e => {
         const m = EV_META[e.eventType] || { icon:'⚡', cls:'', icw:'ic-green', label: e.eventType };
         return `<li class="ev-item ${m.cls}">
             <div class="ev-icon-w ${m.icw}">${m.icon}</div>
-            <div><div class="ev-title">${m.label}</div><div class="ev-sub">${fmt(e.timestamp)} · Trip #${e.tripId}</div></div>
+            <div><div class="ev-title">${m.label} — Trip #${e.tripId}</div>
+            <div class="ev-sub">${fmt(e.timestamp)}</div></div>
         </li>`;
     }).join('');
-    if (data.events.length > previousEventCount && previousEventCount > 0) {
-        data.events.slice(0, data.events.length - previousEventCount).forEach(e => {
+    if ((data.events||[]).length > previousEventCount && previousEventCount > 0) {
+        (data.events||[]).slice(0, data.events.length - previousEventCount).forEach(e => {
             const m = EV_META[e.eventType] || { icon:'⚡' };
             toast(m.icon + ' ' + (EV_META[e.eventType]?.label || e.eventType), 'success');
         });
     }
-    previousEventCount = data.events.length;
+    previousEventCount = (data.events||[]).length;
 }
-let notifHistory = [];
 function updateNotifications(data) {
     const list = document.getElementById('notifList');
-    const notifs = data.events.filter(e => e.eventType === 'PICKUP_ARRIVED' || e.eventType === 'TRIP_COMPLETED');
-    if (!notifs.length) { list.innerHTML = '<li class="empty-msg">No notifications yet…</li>'; return; }
+    const notifs = (data.events||[]).filter(e => e.eventType === 'PICKUP_ARRIVED' || e.eventType === 'TRIP_COMPLETED');
+    if (!notifs.length) { list.innerHTML = '<li class="empty-msg">No notifications yet — system is running automatically</li>'; return; }
     list.innerHTML = notifs.map(e => {
         const isP = e.eventType === 'PICKUP_ARRIVED';
+        // find vehicle reg from trips
+        const tripData = allTripsData.find(t => t.id === e.tripId);
+        const reg = tripData ? tripData.vehicleReg : 'Vehicle';
         return `<li class="ev-item notif">
             <div class="ev-icon-w ic-amber">📱</div>
-            <div>
-                <div class="ev-title">${isP ? 'Push: Cab has arrived!' : 'Push: Trip completed!'}</div>
-                <div class="ev-sub">${isP ? '📲 SMS sent to employee' : '📲 SMS confirmation sent'} · ${fmt(e.timestamp)}</div>
-            </div>
+            <div><div class="ev-title">${isP ? 'Push: ' + reg + ' arrived!' : 'Push: Trip #' + e.tripId + ' completed!'}</div>
+            <div class="ev-sub">${isP ? '📲 SMS + push sent to employee' : '📲 Trip summary SMS sent'} · ${fmt(e.timestamp)}</div></div>
         </li>`;
     }).join('');
 }
 
 // ═══════════════════════════════════════════════════
-// SIMULATION
+// SIMULATION CONTROLS (Demo: manually send pings for vehicle 1)
+// Auto-sim runs automatically — these are optional overrides
 // ═══════════════════════════════════════════════════
-async function sendPing(lat, lng, speed) {
+async function sendPing(lat, lng, speed, vehicleId = 1, tripId = 1) {
     simPingCount++;
     document.getElementById('simPings').textContent = simPingCount;
     const res = await fetch('/api/location/update', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ vehicleId:1, tripId:1, latitude:lat, longitude:lng, speed,
-            timestamp: new Date().toISOString().slice(0,19) })
+        body: JSON.stringify({ vehicleId, tripId, latitude: lat, longitude: lng, speed,
+            timestamp: new Date().toISOString().slice(0, 19) })
     });
     if (!res.ok) { const e = await res.json(); throw new Error(e.message || 'API error'); }
 }
 function setSimulating(on, msg) {
     isSimulating = on;
     const el = document.getElementById('simStatus');
-    el.textContent = msg || (on ? 'Simulating…' : '✅ Ready to simulate');
+    el.textContent = msg || (on ? 'Simulating…' : '✅ Auto-sim running — no manual input needed');
     el.className = 'sim-bar' + (on ? ' running' : '');
     document.querySelectorAll('.sim-btn').forEach(b => b.disabled = on);
 }
@@ -1048,11 +1205,11 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function simulatePickup() {
     try {
-        setSimulating(true, '📍 Sending pickup arrival ping…');
-        await sendPing(12.9520, 77.5750, 2);
+        setSimulating(true, '📍 Sending pickup ping for vehicle 1…');
+        await sendPing(12.9520, 77.5750, 2, 1, 1);
         await sleep(600); await refreshDashboard();
         setSimulating(false, '✅ Pickup ping sent!');
-        toast('📍 Arrived at pickup location (within 50m geofence)', 'success');
+        toast('📍 Vehicle 1 at pickup (manual override)', 'info');
     } catch (e) { setSimulating(false, '❌ ' + e.message); toast('Error: ' + e.message, 'error'); }
 }
 async function simulateDrive() {
@@ -1060,18 +1217,18 @@ async function simulateDrive() {
     const n = roadRouteWaypoints.length;
     const speeds = roadRouteWaypoints.map((_, i) => {
         const t = i / (n - 1);
-        if (t < 0.3)      return Math.round(5  + t / 0.3 * 35);
+        if (t < 0.3)      return Math.round(5 + t / 0.3 * 35);
         else if (t < 0.8) return Math.round(38 + Math.sin(t * Math.PI) * 6);
         else              return Math.round(40 - (t - 0.8) / 0.2 * 35);
     });
     try {
-        setSimulating(true, '🚗 Driving along road route…');
+        setSimulating(true, '🚗 Driving vehicle 1 along road route…');
         for (let i = 0; i < n; i++) {
             const [lat, lng] = roadRouteWaypoints[i]; const spd = speeds[i];
             setSimulating(true, `🚗 Driving… (${i+1}/${n}) — ${spd} km/h`);
-            await sendPing(lat, lng, spd);
+            await sendPing(lat, lng, spd, 1, 1);
             updateSpeedUI(spd);
-            if (vehicleMarker) vehicleMarker.setLatLng([lat, lng]);
+            if (vehicleMarkers[1]) vehicleMarkers[1].setLatLng([lat, lng]);
             await sleep(400);
             if (i % 3 === 0 || i === n - 1) await refreshDashboard();
         }
@@ -1093,11 +1250,11 @@ async function loadRoadRoute(silent = false) {
         roadRouteLayer = L.polyline(roadRouteWaypoints, { color: '#A855F7', weight: 5, opacity: 0.75, dashArray: '10, 6', lineJoin: 'round' }).addTo(map);
         map.fitBounds(roadRouteLayer.getBounds(), { padding: [40, 40] });
         const dist = (json.routes[0].distance / 1000).toFixed(2), dur = Math.round(json.routes[0].duration / 60);
-        if (!silent) { setSimulating(false, `✅ Route loaded (${dist} km, ~${dur} min)`); toast(`🗺️ Road route loaded — ${dist} km · ${roadRouteWaypoints.length} waypoints`, 'success'); }
+        if (!silent) { setSimulating(false, `✅ Route loaded (${dist} km, ~${dur} min)`); toast(`🗺️ Road route loaded — ${dist} km`, 'success'); }
         return true;
     } catch (e) {
-        if (!silent) setSimulating(false, '⚠️ OSRM unavailable — using fallback');
-        toast('⚠️ OSRM unavailable — using fallback straight path', 'warn');
+        if (!silent) setSimulating(false, '⚠️ OSRM unavailable — fallback path');
+        toast('⚠️ OSRM unavailable — fallback path', 'warn');
         roadRouteWaypoints = interpolatePath([[12.9520,77.5750],[12.9580,77.5810],[12.9640,77.5875],[12.9716,77.5946]], 20);
         if (roadRouteLayer) map.removeLayer(roadRouteLayer);
         roadRouteLayer = L.polyline(roadRouteWaypoints, { color:'#A855F7', weight:5, opacity:0.65, dashArray:'8, 5', lineJoin:'round' }).addTo(map);
@@ -1115,29 +1272,32 @@ function interpolatePath(pts, n) {
 }
 async function simulateOffice() {
     try {
-        setSimulating(true, '🏢 Arriving at office (speed 2 km/h)…');
-        await sendPing(12.9716, 77.5946, 2);
+        setSimulating(true, '🏢 Sending office arrival for vehicle 1…');
+        await sendPing(12.9716, 77.5946, 2, 1, 1);
         await sleep(600); await refreshDashboard();
-        setSimulating(false, '✅ Office arrival sent → TRIP_COMPLETED!');
-        toast('🏢 Vehicle inside office geofence — Trip marked COMPLETED!', 'success');
+        setSimulating(false, '✅ Office arrival sent!');
+        toast('🏢 Vehicle 1 at office — Trip COMPLETED!', 'success');
     } catch (e) { setSimulating(false, '❌ ' + e.message); toast('Error: ' + e.message, 'error'); }
 }
 async function resetTrip() {
     try {
-        setSimulating(true, '🔄 Resetting trip…');
+        setSimulating(true, '🔄 Resetting all trips…');
         const res = await fetch('/api/dashboard/reset', { method: 'POST' });
         const data = await res.json();
         if (data.success) {
-            [vehicleMarker, routeLine, roadRouteLayer].forEach(l => { if (l) map.removeLayer(l); });
-            vehicleMarker = routeLine = roadRouteLayer = null;
-            routePoints = []; roadRouteWaypoints = [];
+            // Clear all vehicle markers and trails
+            Object.values(vehicleMarkers).forEach(m => map.removeLayer(m));
+            Object.values(vehicleTrails).forEach(l => map.removeLayer(l));
+            vehicleMarkers = {}; vehicleTrails = {}; trailPoints = {};
+            if (roadRouteLayer) { map.removeLayer(roadRouteLayer); roadRouteLayer = null; }
+            roadRouteWaypoints = [];
             previousEventCount = 0; notifHistory = []; simPingCount = 0;
             document.getElementById('simPings').textContent = '0';
             updateSpeedUI(0);
             document.getElementById('mapVehiclePill').style.display = 'none';
             await refreshDashboard();
-            setSimulating(false, '✅ Reset complete! Ready to simulate.');
-            toast('🔄 Trip has been reset successfully', 'warn');
+            setSimulating(false, '✅ All trips reset — auto-sim will restart');
+            toast('🔄 All 3 trips reset — vehicles returning to pickup points', 'warn');
         } else throw new Error(data.message);
     } catch (e) { setSimulating(false, '❌ ' + e.message); toast('Error: ' + e.message, 'error'); }
 }
@@ -1148,7 +1308,12 @@ async function resetTrip() {
 initMap();
 connectWebSocket();
 refreshDashboard();
-pollInterval = setInterval(() => { if (!isSimulating) refreshDashboard(); }, 4000);
+// Poll every 2 s for status, events, KPIs, pickup updates
+pollInterval = setInterval(() => { if (!isSimulating) refreshDashboard(); }, 2000);
+// Initial sim status message
+setTimeout(() => {
+    document.getElementById('simStatus').textContent = '🤖 Auto-simulation running — 3 vehicles moving automatically';
+}, 1500);
 </script>
 </body>
 </html>

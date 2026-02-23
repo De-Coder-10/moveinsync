@@ -3,6 +3,7 @@ package com.moveinsync.vehicletracking.controller;
 import com.moveinsync.vehicletracking.dto.ApiResponse;
 import com.moveinsync.vehicletracking.entity.*;
 import com.moveinsync.vehicletracking.repository.*;
+import com.moveinsync.vehicletracking.service.AutoSimulationService;
 import com.moveinsync.vehicletracking.util.GeofenceUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,6 +30,7 @@ public class DashboardApiController {
     private final LocationLogRepository locationLogRepository;
     private final EventLogRepository eventLogRepository;
     private final DriverRepository driverRepository;
+    private final AutoSimulationService autoSimulationService;
 
     /**
      * Returns all data needed by the dashboard in a single call
@@ -75,10 +77,17 @@ public class DashboardApiController {
                         m.put("driverLicense", d.getLicenseNumber());
                     });
 
-                    // ETA to next stop (Functionality #6)
+                    // Region / office / route metadata (for dashboard filters)
+                    String[] meta = AutoSimulationService.getRouteMeta(t.getVehicle().getRegistrationNumber());
+                    m.put("region", meta[0]);
+                    m.put("officeName", meta[1]);
+                    m.put("route", meta[2]);
+
+                    // Current speed from latest location log
                     Optional<LocationLog> latestLog = allLogs.stream()
                             .filter(l -> t.getId().equals(l.getTripId()))
                             .max(Comparator.comparing(LocationLog::getTimestamp));
+                    m.put("currentSpeed", latestLog.map(LocationLog::getSpeed).orElse(0.0));
 
                     if (latestLog.isPresent() && "IN_PROGRESS".equals(t.getStatus())) {
                         LocationLog ll = latestLog.get();
@@ -134,6 +143,7 @@ public class DashboardApiController {
                 .map(o -> {
                     Map<String, Object> m = new LinkedHashMap<>();
                     m.put("id", o.getId());
+                    m.put("name", o.getName() != null ? o.getName() : "Office");
                     m.put("latitude", o.getLatitude());
                     m.put("longitude", o.getLongitude());
                     m.put("radiusMeters", o.getRadiusMeters());
@@ -141,23 +151,20 @@ public class DashboardApiController {
                 }).toList();
         data.put("officeGeofences", officesList);
 
-        // Location logs for first trip (route trail)
-        Long tripId = trips.isEmpty() ? null : (Long) trips.get(0).get("id");
-        List<Map<String, Object>> locations = Collections.emptyList();
-        if (tripId != null) {
-            locations = locationLogRepository.findByTripIdOrderByTimestampAsc(tripId).stream()
-                    .map(l -> {
-                        Map<String, Object> m = new LinkedHashMap<>();
-                        m.put("id", l.getId());
-                        m.put("vehicleId", l.getVehicleId());
-                        m.put("tripId", l.getTripId());
-                        m.put("latitude", l.getLatitude());
-                        m.put("longitude", l.getLongitude());
-                        m.put("speed", l.getSpeed());
-                        m.put("timestamp", l.getTimestamp().toString());
-                        return m;
-                    }).toList();
-        }
+        // Location logs for ALL trips (used by frontend to reconstruct vehicle trails)
+        List<Map<String, Object>> locations = locationLogRepository.findAll().stream()
+                .sorted(Comparator.comparing(LocationLog::getTimestamp))
+                .map(l -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("id", l.getId());
+                    m.put("vehicleId", l.getVehicleId());
+                    m.put("tripId", l.getTripId());
+                    m.put("latitude", l.getLatitude());
+                    m.put("longitude", l.getLongitude());
+                    m.put("speed", l.getSpeed());
+                    m.put("timestamp", l.getTimestamp().toString());
+                    return m;
+                }).toList();
         data.put("locationLogs", locations);
 
         // Events (newest first)
@@ -181,7 +188,7 @@ public class DashboardApiController {
     }
 
     /**
-     * Resets the trip so the user can re-run the simulation
+     * Resets ALL trips so the auto-simulation can re-run from the start.
      */
     @PostMapping("/reset")
     @Transactional
@@ -193,39 +200,34 @@ public class DashboardApiController {
             );
         }
 
-        Trip trip = trips.get(0);
-        Long tripId = trip.getId();
-        log.info("Resetting trip ID: {}", tripId);
+        // Clear in-memory simulation state (waypoint indices, reset timers)
+        autoSimulationService.resetAll();
 
-        // Delete location logs for this trip
-        List<LocationLog> logs = locationLogRepository.findByTripIdOrderByTimestampAsc(tripId);
-        locationLogRepository.deleteAll(logs);
+        for (Trip trip : trips) {
+            Long tripId = trip.getId();
+            log.info("Resetting trip ID: {}", tripId);
 
-        // Delete events for this trip
-        List<EventLog> events = eventLogRepository.findByTripId(tripId);
-        eventLogRepository.deleteAll(events);
+            locationLogRepository.deleteAll(locationLogRepository.findByTripIdOrderByTimestampAsc(tripId));
+            eventLogRepository.deleteAll(eventLogRepository.findByTripId(tripId));
 
-        // Reset trip status
-        trip.setStatus("IN_PROGRESS");
-        trip.setEndTime(null);
-        trip.setStartTime(LocalDateTime.now());
-        trip.setTotalDistanceKm(null);
-        trip.setDurationMinutes(null);
-        trip.setOfficeEntryTime(null); // EC3: clear dwell timer on reset
-        tripRepository.save(trip);
+            trip.setStatus("IN_PROGRESS");
+            trip.setEndTime(null);
+            trip.setStartTime(LocalDateTime.now());
+            trip.setTotalDistanceKm(null);
+            trip.setDurationMinutes(null);
+            trip.setOfficeEntryTime(null);
+            tripRepository.save(trip);
 
-        // Reset all pickup points for this trip (supports multi-stop — EC5)
-        List<PickupPoint> pickups = pickupPointRepository.findAllByTripId(tripId);
-        pickups.forEach(pp -> {
-            pp.setStatus("PENDING");
-            pickupPointRepository.save(pp);
-        });
-        log.info("Reset {} pickup point(s) to PENDING for trip {}", pickups.size(), tripId);
+            pickupPointRepository.findAllByTripId(tripId).forEach(pp -> {
+                pp.setStatus("PENDING");
+                pickupPointRepository.save(pp);
+            });
+        }
 
-        log.info("Trip {} reset successfully", tripId);
-
+        log.info("All {} trips reset successfully", trips.size());
         return ResponseEntity.ok(
-                ApiResponse.builder().success(true).message("Trip reset successfully").build()
+                ApiResponse.builder().success(true)
+                        .message("All " + trips.size() + " trips reset successfully").build()
         );
     }
 }

@@ -163,6 +163,11 @@ public class LocationService {
                 notificationService.sendPickupArrivalNotification(
                         request.getVehicleId(), request.getTripId(),
                         request.getLatitude(), request.getLongitude());
+
+                // Push geofence event over WebSocket for instant dashboard update
+                pushGeofenceEvent(request.getVehicleId(), request.getTripId(),
+                        trip.getVehicle().getRegistrationNumber(), "PICKUP_ARRIVED",
+                        request.getLatitude(), request.getLongitude());
             }
         }
     }
@@ -306,10 +311,34 @@ public class LocationService {
 
         notificationService.sendTripCompletionNotification(request.getVehicleId(), request.getTripId());
 
+        // Push geofence event over WebSocket so dashboard updates immediately
+        pushGeofenceEvent(request.getVehicleId(), request.getTripId(),
+                trip.getVehicle().getRegistrationNumber(), "TRIP_COMPLETED",
+                request.getLatitude(), request.getLongitude());
+
         log.info("Trip #{} auto-closed — duration: {} min, distance: {} km",
                 trip.getId(), durationMinutes,
                 trip.getTotalDistanceKm() != null
                         ? String.format("%.2f", trip.getTotalDistanceKm()) : "0.00");
+    }
+
+    /**
+     * Pushes a typed geofence event to /topic/geofence-events so the dashboard
+     * can react instantly (pickup arrived, trip completed, etc.) without waiting
+     * for the next polling cycle.
+     */
+    private void pushGeofenceEvent(Long vehicleId, Long tripId, String vehicleReg,
+                                   String eventType, double lat, double lon) {
+        Map<String, Object> msg = new LinkedHashMap<>();
+        msg.put("eventType", eventType);
+        msg.put("vehicleId", vehicleId);
+        msg.put("tripId", tripId);
+        msg.put("vehicleReg", vehicleReg);
+        msg.put("latitude", lat);
+        msg.put("longitude", lon);
+        msg.put("timestamp", LocalDateTime.now().toString());
+        messagingTemplate.convertAndSend("/topic/geofence-events", msg);
+        log.info("WS geofence-event: {} — vehicle {} trip {}", eventType, vehicleReg, tripId);
     }
 
     /**
@@ -367,6 +396,7 @@ public class LocationService {
         Map<String, Object> message = new LinkedHashMap<>();
         message.put("vehicleId", request.getVehicleId());
         message.put("tripId", request.getTripId());
+        message.put("vehicleReg", trip.getVehicle().getRegistrationNumber());
         message.put("latitude", request.getLatitude());
         message.put("longitude", request.getLongitude());
         message.put("speed", request.getSpeed());

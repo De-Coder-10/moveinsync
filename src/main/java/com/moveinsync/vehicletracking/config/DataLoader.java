@@ -88,14 +88,75 @@ public class DataLoader implements CommandLineRunner {
                 pickupPoint.getLatitude(), pickupPoint.getLongitude(), 
                 pickupPoint.getRadiusMeters(), pickupPoint.getStatus());
 
-        log.info("Data initialization completed successfully!");
-        log.info("========================================");
-        log.info("Sample Data Summary:");
-        log.info("Vehicle ID: {}, Registration: {}", vehicle.getId(), vehicle.getRegistrationNumber());
-        log.info("Trip ID: {}, Status: {}", trip.getId(), trip.getStatus());
-        log.info("Pickup Point: Lat={}, Lon={}", pickupPoint.getLatitude(), pickupPoint.getLongitude());
-        log.info("Office: Lat={}, Lon={}", officeGeofence.getLatitude(), officeGeofence.getLongitude());
-        log.info("========================================");
+        // ─── Vehicle 2 — South Route (HSR Layout → MG Road) ──────────────────
+        Vehicle vehicle2 = Vehicle.builder()
+                .registrationNumber("MH02CD5678")
+                .status("ACTIVE")
+                .build();
+        vehicleRepository.save(vehicle2);
+
+        Driver driver2 = Driver.builder()
+                .name("Arjun Singh")
+                .phoneNumber("+91-9123456789")
+                .licenseNumber("MH0220220056789")
+                .vehicle(vehicle2)
+                .build();
+        driverRepository.save(driver2);
+
+        Trip trip2 = Trip.builder()
+                .vehicle(vehicle2)
+                .status("IN_PROGRESS")
+                .startTime(LocalDateTime.now().minusMinutes(20))
+                .build();
+        tripRepository.save(trip2);
+
+        PickupPoint pickup2 = PickupPoint.builder()
+                .trip(trip2)
+                .latitude(12.9050)
+                .longitude(77.6020)
+                .radiusMeters(50.0)
+                .status("PENDING")
+                .build();
+        pickupPointRepository.save(pickup2);
+        log.info("Vehicle 2 created: {} | Trip: #{} | Pickup: ({},{})",
+                vehicle2.getRegistrationNumber(), trip2.getId(),
+                pickup2.getLatitude(), pickup2.getLongitude());
+
+        // ─── Vehicle 3 — East Route (HAL/Indiranagar → MG Road) ─────────────
+        Vehicle vehicle3 = Vehicle.builder()
+                .registrationNumber("TN03EF9012")
+                .status("ACTIVE")
+                .build();
+        vehicleRepository.save(vehicle3);
+
+        Driver driver3 = Driver.builder()
+                .name("Priya Sharma")
+                .phoneNumber("+91-9988776655")
+                .licenseNumber("TN0320200098765")
+                .vehicle(vehicle3)
+                .build();
+        driverRepository.save(driver3);
+
+        Trip trip3 = Trip.builder()
+                .vehicle(vehicle3)
+                .status("IN_PROGRESS")
+                .startTime(LocalDateTime.now().minusMinutes(35))
+                .build();
+        tripRepository.save(trip3);
+
+        PickupPoint pickup3 = PickupPoint.builder()
+                .trip(trip3)
+                .latitude(12.9780)
+                .longitude(77.6450)
+                .radiusMeters(50.0)
+                .status("PENDING")
+                .build();
+        pickupPointRepository.save(pickup3);
+        log.info("Vehicle 3 created: {} | Trip: #{} | Pickup: ({},{})",
+                vehicle3.getRegistrationNumber(), trip3.getId(),
+                pickup3.getLatitude(), pickup3.getLongitude());
+
+        log.info("Data initialization completed — 3 vehicles, 3 trips, 3 pickup points");
     }
 
 }
