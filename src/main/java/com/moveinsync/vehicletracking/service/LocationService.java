@@ -49,6 +49,13 @@ public class LocationService {
     private double speedThresholdKmh;
 
     /**
+     * Minimum trip duration in minutes before auto-close is allowed (0 = disabled).
+     * Spec: "Additional validations may include: Minimum trip duration".
+     */
+    @Value("${geofence.office.min-trip-duration-minutes:0}")
+    private int minTripDurationMinutes;
+
+    /**
      * Main entry point. Called on every GPS ping from a vehicle.
      *
      * Steps:
@@ -167,6 +174,22 @@ public class LocationService {
      * EC5  — Multi-stop: all pickups must be ARRIVED before auto-closing
      * Functionality #3/5/7 — Auto Trip Closure, notifications, event engine
      */
+    /**
+     * Returns true if the vehicle (lat/lon) is inside the given geofence.
+     * Delegates to circular (Haversine) or polygon (ray-casting) check
+     * based on geofence.geofenceType.
+     */
+    private boolean isVehicleInsideGeofence(double lat, double lon, OfficeGeofence geofence) {
+        if ("POLYGON".equalsIgnoreCase(geofence.getGeofenceType())
+                && geofence.getPolygonCoordinates() != null
+                && !geofence.getPolygonCoordinates().isBlank()) {
+            return GeofenceUtil.isWithinPolygon(lat, lon, geofence.getPolygonCoordinates());
+        }
+        return GeofenceUtil.isWithinRadius(lat, lon,
+                geofence.getLatitude(), geofence.getLongitude(),
+                geofence.getRadiusMeters());
+    }
+
     private void checkOfficeGeofence(Trip trip, LocationUpdateRequest request) {
         List<OfficeGeofence> officeGeofences = officeGeofenceRepository.findAll();
         if (officeGeofences.isEmpty()) {
@@ -174,11 +197,11 @@ public class LocationService {
             return;
         }
 
-        OfficeGeofence officeGeofence = officeGeofences.get(0);
-        boolean isInside = GeofenceUtil.isWithinRadius(
-                request.getLatitude(), request.getLongitude(),
-                officeGeofence.getLatitude(), officeGeofence.getLongitude(),
-                officeGeofence.getRadiusMeters());
+        // Support multiple office geofences (circular or polygon) — match first one the vehicle is inside
+        Optional<OfficeGeofence> matchedGeofence = officeGeofences.stream()
+                .filter(g -> isVehicleInsideGeofence(request.getLatitude(), request.getLongitude(), g))
+                .findFirst();
+        boolean isInside = matchedGeofence.isPresent();
 
         // EC2/EC3 — Vehicle exited geofence: reset dwell timer so GPS drift can't re-trigger
         if (!isInside && trip.getOfficeEntryTime() != null && "IN_PROGRESS".equals(trip.getStatus())) {
@@ -222,6 +245,19 @@ public class LocationService {
             log.debug("EC3: Speed {} km/h >= threshold {} km/h for trip #{} — drive-through protection active",
                     String.format("%.1f", request.getSpeed()), speedThresholdKmh, trip.getId());
             return;
+        }
+
+        // Minimum trip duration check (spec: "Additional validations may include: minimum trip duration")
+        if (minTripDurationMinutes > 0) {
+            long tripDurationMins = ChronoUnit.MINUTES.between(trip.getStartTime(), LocalDateTime.now());
+            if (tripDurationMins < minTripDurationMinutes) {
+                log.warn("Min duration not met for trip #{} — {}min elapsed / {}min required",
+                        trip.getId(), tripDurationMins, minTripDurationMinutes);
+                logAuditEvent(request.getVehicleId(), request.getTripId(),
+                        GeofenceEventType.TRIP_CLOSURE_BLOCKED_MIN_DURATION,
+                        request.getLatitude(), request.getLongitude());
+                return;
+            }
         }
 
         // EC5 — Multi-stop: all pickup points must be ARRIVED before closing

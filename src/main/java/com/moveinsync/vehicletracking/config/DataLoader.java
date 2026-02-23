@@ -37,9 +37,11 @@ public class DataLoader implements CommandLineRunner {
         // Create Office Geofence
         // Using coordinates near Bangalore MG Road (example)
         OfficeGeofence officeGeofence = OfficeGeofence.builder()
+                .name("Bangalore HQ")
                 .latitude(12.9716)  // Bangalore MG Road area
                 .longitude(77.5946)
-                .radiusMeters(100.0) // 100 meters radius
+                .radiusMeters(100.0) // 100 metres radius
+                .geofenceType("CIRCULAR")
                 .build();
         officeGeofenceRepository.save(officeGeofence);
         log.info("Office geofence created: Lat={}, Lon={}, Radius={}m", 
