@@ -48,10 +48,10 @@ public class LocationService {
     @Value("${geofence.office.speed-threshold-kmh:5.0}")
     private double speedThresholdKmh;
 
-    /**
-     * Minimum trip duration in minutes before auto-close is allowed (0 = disabled).
-     * Spec: "Additional validations may include: Minimum trip duration".
-     */
+                                                                                                                                /**
+                                                                                                                                 * Minimum trip duration in minutes before auto-close is allowed (0 = disabled).
+                                                                                                                                 * Spec: "Additional validations may include: Minimum trip duration".
+                                                                                                                                 */
     @Value("${geofence.office.min-trip-duration-minutes:0}")
     private int minTripDurationMinutes;
 
