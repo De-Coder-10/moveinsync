@@ -32,8 +32,5 @@ public enum GeofenceEventType {
     ADMIN_ALERT,
 
     /** Auto-closure was attempted but blocked because not all pickup points were ARRIVED (EC5) */
-    TRIP_CLOSURE_BLOCKED_PENDING_PICKUPS,
-
-    /** Auto-closure blocked because the trip has not yet reached the minimum duration threshold */
-    TRIP_CLOSURE_BLOCKED_MIN_DURATION
+    TRIP_CLOSURE_BLOCKED_PENDING_PICKUPS
 }
