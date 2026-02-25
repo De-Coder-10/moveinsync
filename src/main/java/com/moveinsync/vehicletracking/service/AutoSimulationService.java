@@ -57,49 +57,14 @@ public class AutoSimulationService {
     /** Pickup start coordinates per vehicle registration */
     private static final Map<String, double[]> ROUTE_STARTS = Map.of(
             "KA01AB1234", new double[]{12.9520, 77.5750},
-            "MH02CD5678", new double[]{12.9050, 77.6020},
             "TN03EF9012", new double[]{12.9780, 77.6450}
     );
 
     /** All routes end at Bangalore HQ */
     private static final double[] OFFICE = {12.9716, 77.5946};
 
-    /** Fallback straight-line routes used when OSRM is unreachable */
-    private static final Map<String, double[][]> FALLBACK_ROUTES = new LinkedHashMap<>();
-
-    static {
-        FALLBACK_ROUTES.put("KA01AB1234", new double[][]{
-            {12.9520,77.5750},{12.9528,77.5758},{12.9536,77.5766},{12.9543,77.5774},
-            {12.9551,77.5782},{12.9559,77.5789},{12.9567,77.5797},{12.9575,77.5805},
-            {12.9583,77.5813},{12.9590,77.5821},{12.9598,77.5829},{12.9606,77.5837},
-            {12.9614,77.5844},{12.9622,77.5852},{12.9630,77.5860},{12.9637,77.5868},
-            {12.9645,77.5876},{12.9653,77.5884},{12.9661,77.5892},{12.9669,77.5899},
-            {12.9676,77.5907},{12.9684,77.5915},{12.9692,77.5923},{12.9700,77.5931},
-            {12.9708,77.5939},{12.9716,77.5946}
-        });
-        FALLBACK_ROUTES.put("MH02CD5678", new double[][]{
-            {12.9050,77.6020},{12.9077,77.6017},{12.9103,77.6014},{12.9130,77.6011},
-            {12.9157,77.6008},{12.9183,77.6005},{12.9210,77.6003},{12.9237,77.6000},
-            {12.9264,77.5997},{12.9290,77.5994},{12.9317,77.5991},{12.9344,77.5988},
-            {12.9370,77.5985},{12.9397,77.5982},{12.9424,77.5979},{12.9450,77.5976},
-            {12.9477,77.5973},{12.9504,77.5970},{12.9530,77.5967},{12.9557,77.5964},
-            {12.9584,77.5961},{12.9610,77.5958},{12.9637,77.5956},{12.9664,77.5953},
-            {12.9690,77.5950},{12.9716,77.5946}
-        });
-        FALLBACK_ROUTES.put("TN03EF9012", new double[][]{
-            {12.9780,77.6450},{12.9777,77.6429},{12.9775,77.6409},{12.9772,77.6389},
-            {12.9769,77.6369},{12.9767,77.6349},{12.9764,77.6328},{12.9762,77.6308},
-            {12.9759,77.6288},{12.9756,77.6268},{12.9754,77.6247},{12.9751,77.6227},
-            {12.9748,77.6207},{12.9746,77.6187},{12.9743,77.6167},{12.9741,77.6146},
-            {12.9738,77.6126},{12.9735,77.6106},{12.9733,77.6086},{12.9730,77.6065},
-            {12.9728,77.6045},{12.9725,77.6025},{12.9722,77.6005},{12.9720,77.5985},
-            {12.9717,77.5964},{12.9716,77.5946}
-        });
-    }
-
     private static final Map<String, String[]> ROUTE_META = Map.of(
             "KA01AB1234", new String[]{"Bangalore", "Bangalore HQ", "North Route"},
-            "MH02CD5678", new String[]{"Pune",      "Bangalore HQ", "South Route"},
             "TN03EF9012", new String[]{"Chennai",   "Bangalore HQ", "East Route"}
     );
 
@@ -235,8 +200,8 @@ public class AutoSimulationService {
             log.info("AutoSim: OSRM road route fetched -- {} waypoints for {}", waypoints.length, reg);
             return waypoints;
         } catch (Exception e) {
-            log.warn("AutoSim: OSRM unavailable for {} -- using fallback: {}", reg, e.getMessage());
-            return FALLBACK_ROUTES.getOrDefault(reg, FALLBACK_ROUTES.get("KA01AB1234"));
+            log.error("AutoSim: OSRM unavailable for {} -- {}", reg, e.getMessage());
+            throw new RuntimeException("Failed to fetch OSRM route for " + reg + ". Ensure internet connectivity and try again.");
         }
     }
 

@@ -14,10 +14,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 /**
- * REST API for managing Office Geofence configurations.
- *
- * Allows enterprise admins to configure office locations without redeploying
- * the application. Supports both CIRCULAR and POLYGON geofence types.
+ * REST API for managing circular office geofence configurations.
  *
  * Endpoints:
  *   GET    /api/geofences           — list all configured geofences
@@ -58,57 +55,26 @@ public class OfficeGeofenceController {
                         .body(ApiResponse.error("Geofence not found with ID: " + id)));
     }
 
-    /**
-     * Create a new office geofence.
-     *
-     * For CIRCULAR type, only latitude/longitude/radiusMeters are needed.
-     * For POLYGON type, polygonCoordinates must be a valid JSON array of [lat,lon] pairs.
-     *
-     * Example: POST /api/geofences
-     * {
-     *   "name": "Bangalore HQ",
-     *   "latitude": 12.9716,
-     *   "longitude": 77.5946,
-     *   "radiusMeters": 100,
-     *   "geofenceType": "CIRCULAR"
-     * }
-     */
     @PostMapping
     public ResponseEntity<ApiResponse> create(
             @RequestBody @Valid OfficeGeofenceRequest request) {
-
-        // Validate polygon coordinates if type is POLYGON
-        if ("POLYGON".equalsIgnoreCase(request.getGeofenceType())) {
-            if (request.getPolygonCoordinates() == null || request.getPolygonCoordinates().isBlank()) {
-                return ResponseEntity
-                        .badRequest()
-                        .body(ApiResponse.error("polygonCoordinates is required for POLYGON geofence type"));
-            }
-        }
 
         OfficeGeofence geofence = OfficeGeofence.builder()
                 .name(request.getName())
                 .latitude(request.getLatitude())
                 .longitude(request.getLongitude())
                 .radiusMeters(request.getRadiusMeters())
-                .geofenceType(request.getGeofenceType() != null
-                        ? request.getGeofenceType().toUpperCase() : "CIRCULAR")
-                .polygonCoordinates(request.getPolygonCoordinates())
                 .build();
 
         OfficeGeofence saved = officeGeofenceRepository.save(geofence);
-        log.info("Office geofence created: id={}, name='{}', type={}, radius={}m",
-                saved.getId(), saved.getName(), saved.getGeofenceType(), saved.getRadiusMeters());
+        log.info("Office geofence created: id={}, name='{}', radius={}m",
+                saved.getId(), saved.getName(), saved.getRadiusMeters());
 
         return ResponseEntity
                 .status(HttpStatus.CREATED)
                 .body(ApiResponse.success(saved, "Geofence created successfully"));
     }
 
-    /**
-     * Update an existing office geofence by ID.
-     * Useful for adjusting the radius or changing between CIRCULAR and POLYGON.
-     */
     @PutMapping("/{id}")
     public ResponseEntity<ApiResponse> update(
             @PathVariable Long id,
@@ -120,13 +86,10 @@ public class OfficeGeofenceController {
                     existing.setLatitude(request.getLatitude());
                     existing.setLongitude(request.getLongitude());
                     existing.setRadiusMeters(request.getRadiusMeters());
-                    existing.setGeofenceType(request.getGeofenceType() != null
-                            ? request.getGeofenceType().toUpperCase() : "CIRCULAR");
-                    existing.setPolygonCoordinates(request.getPolygonCoordinates());
 
                     OfficeGeofence updated = officeGeofenceRepository.save(existing);
-                    log.info("Office geofence updated: id={}, name='{}', type={}",
-                            updated.getId(), updated.getName(), updated.getGeofenceType());
+                    log.info("Office geofence updated: id={}, name='{}'",
+                            updated.getId(), updated.getName());
 
                     return ResponseEntity.ok(ApiResponse.success(updated, "Geofence updated successfully"));
                 })

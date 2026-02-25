@@ -5,7 +5,6 @@ import com.moveinsync.vehicletracking.entity.GeofenceEventType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
-import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -27,19 +26,6 @@ public interface EventLogRepository extends JpaRepository<EventLog, Long> {
     default List<EventLog> findByTripId(Long tripId) {
         return findByTripIdOrderByTimestampAsc(tripId);
     }
-
-    // ── Vehicle-scoped queries ─────────────────────────────────────────────────
-
-    /** Returns all events for a vehicle ordered newest-first. */
-    List<EventLog> findByVehicleIdOrderByTimestampDesc(Long vehicleId);
-
-    // ── Time-range queries ─────────────────────────────────────────────────────
-
-    /**
-     * Returns events whose eventTimestamp falls within [start, end].
-     * Used for SLA reporting periods and client billing reports.
-     */
-    List<EventLog> findByTimestampBetweenOrderByTimestampAsc(LocalDateTime start, LocalDateTime end);
 
     // ── Idempotency guard ──────────────────────────────────────────────────────
 

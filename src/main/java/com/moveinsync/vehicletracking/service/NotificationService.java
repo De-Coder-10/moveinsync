@@ -26,14 +26,7 @@ public class NotificationService {
         log.info("[PUSH NOTIFICATION] Location: ({}, {})", lat, lon);
         log.info("[SMS FALLBACK] Sending SMS: 'Your cab KA01AB1234 has arrived. Please come down.'");
         log.info("================================================================");
-        // TODO (Production): Firebase FCM integration
-        //   Message message = Message.builder()
-        //       .setNotification(Notification.builder().setTitle("Cab Arrived!").setBody("Your cab is here").build())
-        //       .setToken(employeeDeviceToken).build();
-        //   firebaseMessaging.send(message);
-        //
-        // TODO (Production): SMS fallback via Twilio
-        //   Message.creator(new PhoneNumber(employeePhone), twilioFrom, "Cab arrived!").create();
+        
     }
 
     /**

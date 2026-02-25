@@ -18,19 +18,8 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Service wrapping static-data repository calls with Spring Cache annotations.
- *
- * Why a separate service?
- *   @Cacheable is implemented via Spring AOP proxies. Self-calls within the same
- *   bean bypass the proxy, so cache annotations are silently ignored.
- *   Placing these methods here ensures every call goes through the proxy and
- *   the cache is always consulted first.
- *
- * Caching strategy:
- *   READ  → @Cacheable  : returns cached value if present;
- *                         on miss, loads from DB, stores in cache, returns.
- *   EVICT → @CacheEvict : clears cache entries immediately;
- *                         fired on simulation reset so next poll reloads from DB.
+ * Wraps static-data repository calls with Spring Cache annotations.
+ * Kept as a separate bean so self-invocation doesn't bypass the AOP proxy.
  */
 @Service
 @RequiredArgsConstructor
@@ -41,66 +30,28 @@ public class CacheableDataService {
     private final VehicleRepository        vehicleRepository;
     private final DriverRepository         driverRepository;
 
-    // ────────────────────────────────────────────────────────────────────────
-    // READ methods (cache population)
-    // ────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Returns all office geofences.
-     *
-     * Hit  path : O(1) — Caffeine hash lookup, zero DB round-trip.
-     * Miss path : O(n) — full table scan (tiny table, immediately cached).
-     *
-     * Called every 2 seconds by dashboard polling; without caching this is
-     * 30 identical DB reads per minute for data that never changes at runtime.
-     */
+    /** Returns all office geofences, cached to avoid repeated DB reads on every dashboard poll. */
     @Cacheable(CacheConfig.CACHE_OFFICE_GEOFENCES)
     public List<OfficeGeofence> getOfficeGeofences() {
         log.debug("[CACHE MISS] officeGeofences — loading from DB");
         return officeGeofenceRepository.findAll();
     }
 
-    /**
-     * Returns all vehicles.
-     * Vehicle registrations are static for the lifetime of a simulation session.
-     */
+    /** Returns all vehicles (static for the lifetime of a simulation session). */
     @Cacheable(CacheConfig.CACHE_VEHICLE_DRIVER)
     public List<Vehicle> getVehicles() {
         log.debug("[CACHE MISS] vehicles — loading from DB");
         return vehicleRepository.findAll();
     }
 
-    /**
-     * Returns the driver assigned to a vehicle, cached per vehicleId.
-     *
-     * Cache key  : "driver-{vehicleId}" — avoids collision with the vehicle list entry.
-     * Called N times per dashboard poll (once per active trip) — caching turns
-     * N DB queries into N O(1) lookups after the first poll.
-     *
-     * @param vehicleId the vehicle's primary key
-     */
+    /** Returns the driver assigned to a vehicle, cached per vehicleId. */
     @Cacheable(value = CacheConfig.CACHE_VEHICLE_DRIVER, key = "'driver-' + #vehicleId")
     public Optional<Driver> getDriverByVehicleId(Long vehicleId) {
         log.debug("[CACHE MISS] driver for vehicle #{} — loading from DB", vehicleId);
         return driverRepository.findByVehicleId(vehicleId);
     }
 
-    // ────────────────────────────────────────────────────────────────────────
-    // EVICT method (cache invalidation)
-    // ────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Evicts all entries from both static caches.
-     *
-     * Called by DashboardApiController.resetTrip() so that the very next
-     * dashboard poll reloads fresh data from the DB rather than serving
-     * potentially stale cached entries.
-     *
-     * Eviction policy in effect:
-     *   1. Explicit (this method)  — immediate, triggered on reset.
-     *   2. TTL-based               — Caffeine evicts entries 60 min after last write.
-     *   3. LRU-based               — Caffeine evicts LRU entries when maximumSize is hit.
-     */
+    /** Evicts all static cache entries; called on simulation reset so the next poll reloads from DB. */
     @Caching(evict = {
             @CacheEvict(value = CacheConfig.CACHE_OFFICE_GEOFENCES, allEntries = true),
             @CacheEvict(value = CacheConfig.CACHE_VEHICLE_DRIVER,   allEntries = true)

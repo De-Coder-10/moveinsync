@@ -24,13 +24,11 @@ import java.util.*;
 @Slf4j
 public class DashboardApiController {
 
-    private final VehicleRepository vehicleRepository;
     private final TripRepository tripRepository;
     private final PickupPointRepository pickupPointRepository;
     private final OfficeGeofenceRepository officeGeofenceRepository;
     private final LocationLogRepository locationLogRepository;
     private final EventLogRepository eventLogRepository;
-    private final DriverRepository driverRepository;
     private final AutoSimulationService autoSimulationService;
     private final CacheableDataService cacheableDataService;
 

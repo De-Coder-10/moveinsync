@@ -36,8 +36,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
                 .addPathPatterns(
                         "/api/dashboard/**",
                         "/api/location/**",
-                        "/api/trip/**",
-                        "/api/audit/**"
+                        "/api/trip/**"
                 )
                 // Never intercept auth endpoints, login page, WS, or error handler
                 .excludePathPatterns(

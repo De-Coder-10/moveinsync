@@ -155,17 +155,6 @@
         }
         .map-pill .dot { width: 8px; height: 8px; border-radius: 50%; }
 
-        .map-legend {
-            position: absolute; bottom: 30px; left: 12px;
-            background: var(--white); border: 1.5px solid var(--border);
-            border-radius: var(--radius); padding: 12px 16px;
-            z-index: 999; font-size: 11px; box-shadow: var(--shadow-md); min-width: 160px;
-        }
-        .map-legend h4 { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.2px; color: var(--text-3); margin-bottom: 8px; }
-        .leg-item { display: flex; align-items: center; gap: 8px; padding: 3px 0; color: var(--text-2); font-size: 11px; }
-        .leg-dot  { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
-        .leg-line { width: 18px; height: 3px; border-radius: 2px; flex-shrink: 0; }
-
         /* ===== RIGHT PANEL ===== */
         .right-panel {
             width: 345px; min-width: 345px;
@@ -449,14 +438,6 @@
                 <div class="map-pill" id="mapVehiclePill" style="display:none">🚐 <span id="mapVehicleInfo">—</span></div>
             </div>
             <div id="map"></div>
-            <div class="map-legend">
-                <h4>Map Legend</h4>
-                <div class="leg-item"><span class="leg-dot" style="background:rgba(59,130,246,.25);border:2px solid #3B82F6"></span>Pickup Zone</div>
-                <div class="leg-item"><span class="leg-dot" style="background:rgba(0,166,81,.25);border:2px solid var(--green)"></span>Office Zone</div>
-                <div class="leg-item"><span class="leg-line" style="border-top:2px dashed #A855F7"></span>Road Route</div>
-                <div class="leg-item"><span class="leg-line" style="background:#F59E0B"></span>Route Trail</div>
-                <div class="leg-item">🚐 Live Vehicle</div>
-            </div>
         </div>
 
         <!-- RIGHT PANEL: COMMAND CENTER -->
@@ -532,8 +513,6 @@
                     </div>
                     <div class="card-body">
                         <div class="stats-grid">
-                            <div class="stat-box"><div class="stat-val" id="statPings">0</div><div class="stat-lbl">GPS Pings</div></div>
-                            <div class="stat-box"><div class="stat-val" id="statEvents">0</div><div class="stat-lbl">Events</div></div>
                             <div class="stat-box hi"><div class="stat-val" id="statSpeed">—</div><div class="stat-lbl">Speed km/h</div></div>
                             <div class="stat-box"><div class="stat-val" id="statDist">0</div><div class="stat-lbl">Distance km</div></div>
                             <div class="stat-box full"><div class="stat-val" style="font-size:15px" id="statEta">—</div><div class="stat-lbl">ETA to Next Stop</div></div>
@@ -618,19 +597,6 @@
                     </div>
                 </div>
 
-                <div class="card">
-                    <div class="card-hdr">
-                        <span class="card-hdr-icon">📋</span>
-                        <span class="card-hdr-title">Audit Event Log</span>
-                        <span class="card-hdr-badge" id="eventCount">0</span>
-                    </div>
-                    <div class="card-body" style="padding:8px 10px">
-                        <ul class="ev-list" id="eventList">
-                            <li class="empty-msg">No events yet. Run a simulation!</li>
-                        </ul>
-                    </div>
-                </div>
-
             </div>
 
             <!-- ── TAB: SIMULATE ── -->
@@ -700,7 +666,7 @@ let officeCircles   = {};   // officeId  → Leaflet circle
 let roadRouteLayers = {};   // vehicleId → Leaflet polyline (planned road route, auto-sim)
 let roadRouteLayer  = null, roadRouteWaypoints = [];  // simulate-tab single route
 let stompClient = null, wsConnected = false;
-let previousEventCount = 0, isSimulating = false;
+let isSimulating = false;
 let pollInterval, simPingCount = 0;
 let allTripsData    = [];   // full trip list from API (for filtering)
 let notifHistory    = [];
@@ -961,7 +927,6 @@ async function startTrip(tripId, vehicleId, vehicleReg) {
 // Pickup coords for each vehicle (must match backend ROUTE_STARTS)
 const VEHICLE_PICKUP = {
     'KA01AB1234': [12.9520, 77.5750],
-    'MH02CD5678': [12.9050, 77.6020],
     'TN03EF9012': [12.9780, 77.6450]
 };
 const OFFICE_COORDS = [12.9716, 77.5946];
@@ -1003,7 +968,6 @@ async function refreshDashboard() {
         updateKPIs(data);
         updateStats(data);
         updateMapStatics(data);
-        updateEvents(data);
         updateNotifications(data);
         updateVehiclesList({ trips: getFilteredTrips() });
         // Rebuild trails from DB if WS was disconnected
@@ -1149,10 +1113,6 @@ function updatePickupInfo(data) {
         pp.status === 'ARRIVED' ? '<span class="badge b-arrived">✓ Arrived</span>' : '<span class="badge b-pending">● Pending</span>';
 }
 function updateStats(data) {
-    const total = (data.locationLogs || []).length;
-    document.getElementById('statPings').textContent  = total;
-    document.getElementById('statEvents').textContent = (data.events || []).length;
-    document.getElementById('eventCount').textContent = (data.events || []).length;
     // ETA for first active trip
     const active = (data.trips || []).find(t => t.status === 'IN_PROGRESS');
     if (active) {
@@ -1202,37 +1162,7 @@ function updateMapStatics(data) {
     });
 }
 
-// ═══════════════════════════════════════════════════
-// EVENTS
-// ═══════════════════════════════════════════════════
-const EV_META = {
-    PICKUP_ARRIVED:   { icon:'📍', cls:'pickup',   icw:'ic-blue',  label:'Pickup Arrived'        },
-    OFFICE_REACHED:   { icon:'🏢', cls:'office',   icw:'ic-green', label:'Office Reached'        },
-    TRIP_COMPLETED:   { icon:'✅', cls:'complete',  icw:'ic-green', label:'Trip Completed'        },
-    MANUAL_CLOSURE:   { icon:'🔒', cls:'complete',  icw:'ic-amber', label:'Manual Closure'        },
-    ADMIN_ALERT:      { icon:'🚨', cls:'alert',     icw:'ic-red',   label:'Admin Alert'           },
-    GEOFENCE_EXIT:    { icon:'📤', cls:'alert',     icw:'ic-red',   label:'Geofence Exit'         },
-    TRIP_CLOSURE_BLOCKED_MIN_DURATION: { icon:'⏱️', cls:'notif', icw:'ic-amber', label:'Min Duration Block' }
-};
-function updateEvents(data) {
-    const list = document.getElementById('eventList');
-    if (!(data.events || []).length) { list.innerHTML = '<li class="empty-msg">No events yet — auto-sim will fire events automatically</li>'; return; }
-    list.innerHTML = (data.events || []).map(e => {
-        const m = EV_META[e.eventType] || { icon:'⚡', cls:'', icw:'ic-green', label: e.eventType };
-        return `<li class="ev-item ${m.cls}">
-            <div class="ev-icon-w ${m.icw}">${m.icon}</div>
-            <div><div class="ev-title">${m.label} — Trip #${e.tripId}</div>
-            <div class="ev-sub">${fmt(e.timestamp)}</div></div>
-        </li>`;
-    }).join('');
-    if ((data.events||[]).length > previousEventCount && previousEventCount > 0) {
-        (data.events||[]).slice(0, data.events.length - previousEventCount).forEach(e => {
-            const m = EV_META[e.eventType] || { icon:'⚡' };
-            toast(m.icon + ' ' + (EV_META[e.eventType]?.label || e.eventType), 'success');
-        });
-    }
-    previousEventCount = (data.events||[]).length;
-}
+
 function updateNotifications(data) {
     const list = document.getElementById('notifList');
     const notifs = (data.events||[]).filter(e => e.eventType === 'PICKUP_ARRIVED' || e.eventType === 'TRIP_COMPLETED');
@@ -1360,7 +1290,7 @@ async function resetTrip() {
             Object.values(vehicleTrails).forEach(l => map.removeLayer(l));
             Object.values(roadRouteLayers).forEach(l => map.removeLayer(l));
             vehicleMarkers = {}; vehicleTrails = {}; trailPoints = {}; roadRouteLayers = {};
-            previousEventCount = 0; notifHistory = []; simPingCount = 0;
+            notifHistory = []; simPingCount = 0;
             document.getElementById('simPings').textContent = '0';
             updateSpeedUI(0);
             document.getElementById('mapVehiclePill').style.display = 'none';
