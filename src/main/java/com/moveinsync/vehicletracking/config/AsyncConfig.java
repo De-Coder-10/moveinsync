@@ -9,16 +9,12 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadPoolExecutor;
 
-/**
- * EC8 — High Load During Peak Hours
- * EC9 — Event Processing Scalability
- *
- * Configures an async thread pool for non-blocking location processing.
- * - Core: 10 threads  (handles steady-state load)
- * - Max:  50 threads  (scales up during peak hours)
- * - Queue: 500 tasks  (absorbs burst traffic)
- * - CallerRunsPolicy: if queue full, calling thread processes — prevents data loss
- */
+// 1. Enables async & scheduling (@EnableAsync, @EnableScheduling)
+
+// @EnableAsync activates Spring's @Async support — used by LocationAsyncService.processAsync() 
+// so GPS pings return HTTP 202 immediately while processing happens in the background
+// @EnableScheduling activates @Scheduled — used by AutoSimulationService.tick() which runs 
+// every 1.5 seconds to advance vehicle positions
 @Configuration
 @EnableAsync
 @EnableScheduling
@@ -31,7 +27,7 @@ public class AsyncConfig {
         executor.setMaxPoolSize(50);
         executor.setQueueCapacity(500);
         executor.setThreadNamePrefix("location-async-");
-        // Backpressure: caller thread processes when queue is full — no data loss
+        // Backpressure: caller thread processes when queue is full — no data loss 
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
         executor.initialize();
         return executor;

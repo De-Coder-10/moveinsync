@@ -2,6 +2,8 @@ package com.moveinsync.vehicletracking.dto;
 
 import lombok.*;
 
+// DATA TRANSER OBJECT (DTO)
+
 /**
  * Generic API response wrapper.
  *

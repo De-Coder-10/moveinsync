@@ -165,8 +165,6 @@ public class LocationService {
         }
     }
 
-    /**
-
     private boolean isVehicleInsideGeofence(double lat, double lon, OfficeGeofence geofence) {
         return GeofenceUtil.isWithinRadius(lat, lon,
                 geofence.getLatitude(), geofence.getLongitude(),

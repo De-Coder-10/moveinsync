@@ -5,24 +5,21 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
-/**
- * WebMvcConfig — registers the AuthInterceptor on protected API routes.
- *
- * ⚠️  THIS IS A SIMULATED AUTHENTICATION MECHANISM FOR DEMONSTRATION PURPOSES ONLY.
- *
- * Protected patterns:
- *   /api/dashboard/**  — dashboard data & trip control
- *   /api/location/**   — GPS updates & batch sync
- *   /api/trip/**       — manual trip closure
- *   /api/audit/**      — audit log queries
- *
- * Excluded (always public):
- *   /auth/**           — login / logout / status
- *   /login.html        — login page itself
- *   /                  — root redirect
- *   /ws/**             — WebSocket handshake (SockJS)
- *   /error             — Spring error page
- */
+
+//  WebMvcConfig — registers the AuthInterceptor on protected API routes.
+ 
+//   THIS IS A SIMULATED AUTHENTICATION MECHANISM FOR DEMONSTRATION PURPOSES ONLY.
+ 
+//  Protected patterns:
+//  /api/dashboard/**  — dashboard data & trip control
+//  /api/location/**   — GPS updates & batch sync
+//  /api/trip/**       — manual trip closure
+//  /api/audit/**      — audit log queries
+ 
+ 
+
+// WebMvcConfig customizes Spring MVC configuration, mainly to register interceptors 
+// like AuthInterceptor and configure request handling behavior.
 @Configuration
 public class WebMvcConfig implements WebMvcConfigurer {
 
@@ -44,7 +41,9 @@ public class WebMvcConfig implements WebMvcConfigurer {
                         "/login.html",
                         "/",
                         "/ws/**",
-                        "/error"
+                        "/error",
+                        "/swagger-ui/**",
+                        "/v3/api-docs/**"
                 );
     }
 }

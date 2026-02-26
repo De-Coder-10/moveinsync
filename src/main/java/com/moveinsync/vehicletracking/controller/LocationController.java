@@ -31,11 +31,11 @@ public class LocationController {
     @Value("${location.batch.max-size:100}")
     private int maxBatchSize;
 
-    /**
-     * Endpoint to receive location updates from vehicles
-     * 
-     * @param request Location update data with validation
-     * @return Response indicating success or failure
+    /*
+      Endpoint to receive location updates from vehicles
+      
+      @param request Location update data with validation
+      @return Response indicating success or failure
      */
     @PostMapping("/update")
     public ResponseEntity<ApiResponse> updateLocation(@Valid @RequestBody LocationUpdateRequest request) {
@@ -62,10 +62,10 @@ public class LocationController {
     }
 
     /**
-     * EC1 — Network Fluctuation / Batch Sync
-     * Accepts a list of buffered GPS pings from a device that was offline.
-     * Pings are sorted by timestamp and processed chronologically.
-     * Individual failures don't abort the batch — partial recovery is supported.
+      EC1 — Network Fluctuation / Batch Sync
+      Accepts a list of buffered GPS pings from a device that was offline.
+      Pings are sorted by timestamp and processed chronologically.
+      Individual failures don't abort the batch — partial recovery is supported.
      */
     @PostMapping("/batch")
     public ResponseEntity<ApiResponse> batchUpdate(
@@ -97,11 +97,8 @@ public class LocationController {
                         .build());
     }
 
-    /**
-     * EC8/EC9 — High Load / Async Processing
-     * Returns 202 Accepted immediately; location is processed in background thread pool.
-     * Use this endpoint for high-frequency streaming from many vehicles simultaneously.
-     */
+   
+
     @PostMapping("/update/async")
     public ResponseEntity<ApiResponse> updateLocationAsync(
             @Valid @RequestBody LocationUpdateRequest request) {

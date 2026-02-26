@@ -120,7 +120,6 @@ public class DashboardApiController {
                         m.put("etaMinutes", null);
                         m.put("etaDestination", null);
                     }
-
                     return m;
                 }).toList();
         data.put("trips", trips);

@@ -5,14 +5,12 @@ import org.springframework.web.bind.annotation.GetMapping;
 
 import jakarta.servlet.http.HttpSession;
 
-/**
- * HomeController — redirects root URL based on authentication state.
- *
- * ⚠️  THIS IS A SIMULATED AUTHENTICATION MECHANISM FOR DEMONSTRATION PURPOSES ONLY.
- *
- * GET /  →  authenticated → dashboard.html
- *        →  not authenticated → login.html
- */
+
+//   HomeController — redirects root URL based on authentication state.
+ 
+//             authenticated → dashboard.html
+//             not authenticated → login.html
+
 @Controller
 public class HomeController {
 

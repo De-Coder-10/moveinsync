@@ -9,10 +9,9 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 
-/**
- * Data loader that runs on application startup
- * Inserts sample data for testing the system
- */
+
+//   Inserts sample data for testing the system
+ 
 @Component
 @RequiredArgsConstructor
 @Slf4j
@@ -35,7 +34,6 @@ public class DataLoader implements CommandLineRunner {
         }
 
         // Create Office Geofence
-        // Using coordinates near Bangalore MG Road (example)
         OfficeGeofence officeGeofence = OfficeGeofence.builder()
                 .name("Bangalore HQ")
                 .latitude(12.9716)  // Bangalore MG Road area
@@ -73,12 +71,12 @@ public class DataLoader implements CommandLineRunner {
         log.info("Trip created: ID={}, Status={}", trip.getId(), trip.getStatus());
 
         // Create Pickup Point
-        // Using coordinates 2km away from office (example location)
+
         PickupPoint pickupPoint = PickupPoint.builder()
                 .trip(trip)
                 .latitude(12.9520)  // About 2km from office
                 .longitude(77.5750)
-                .radiusMeters(50.0) // 50 meters radius
+                .radiusMeters(50.0) 
                 .status("PENDING")
                 .build();
         pickupPointRepository.save(pickupPoint);
@@ -94,7 +92,7 @@ public class DataLoader implements CommandLineRunner {
         vehicleRepository.save(vehicle3);
 
         Driver driver3 = Driver.builder()
-                .name("RP Dogra")
+                .name("Krishna Seth")
                 .phoneNumber("+91-9988776655")
                 .licenseNumber("TN0320200098765")
                 .vehicle(vehicle3)

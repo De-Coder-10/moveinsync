@@ -774,7 +774,7 @@ function connectWebSocket() {
         stompClient.connect({}, () => {
             wsConnected = true;
             setConnBadge('ws');
-            toast('🔌 WebSocket connected — 3-vehicle live stream active', 'info');
+            toast('🔌 WebSocket connected — 2-vehicle live stream active', 'info');
 
             // Live GPS pings — update each vehicle's marker + trail instantly
             stompClient.subscribe('/topic/location-updates', msg =>

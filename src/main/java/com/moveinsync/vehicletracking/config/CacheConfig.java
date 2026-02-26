@@ -33,23 +33,16 @@ import java.util.concurrent.TimeUnit;
  *   3. LRU        → maximumSize caps memory; Caffeine evicts least-recently-used
  *                   entries when limit is approached.
  *
- * Complexity:
- *   GET  → O(1) amortised (hash-based Caffeine lookup)
- *   PUT  → O(1) amortised
- *   Space → O(maxSize) — strictly bounded
- *
- * Trade-off: In-process cache works for single-node deployment.
- *   Production multi-node deployment → swap SimpleCacheManager for RedisCacheManager.
  */
 @Configuration
 @EnableCaching
 @Slf4j
 public class CacheConfig {
 
-    /** Cache name for office geofence boundaries (static data) */
+//      Cache name for office geofence boundaries (static data) 
     public static final String CACHE_OFFICE_GEOFENCES = "officeGeofences";
 
-    /** Cache name for vehicle list and per-vehicle driver records (static data) */
+//      Cache name for vehicle list and per-vehicle driver records (static data) 
     public static final String CACHE_VEHICLE_DRIVER = "vehicleDriverData";
 
     @Bean
@@ -65,19 +58,14 @@ public class CacheConfig {
         return manager;
     }
 
-    /**
-     * Builds a named Caffeine cache.
-     *
-     * @param name        logical cache name (used in @Cacheable / @CacheEvict)
-     * @param ttlMinutes  time-to-live after last write (eviction policy)
-     * @param maxSize     maximum number of entries (LRU eviction when exceeded)
-     */
+
+//       Builds a named Caffeine cache
     private CaffeineCache buildCache(String name, int ttlMinutes, int maxSize) {
         return new CaffeineCache(name,
                 Caffeine.newBuilder()
                         .expireAfterWrite(ttlMinutes, TimeUnit.MINUTES)
                         .maximumSize(maxSize)
-                        .recordStats()   // enables hit/miss/eviction metrics in DEBUG logs
+                        .recordStats()
                         .build());
     }
 }
